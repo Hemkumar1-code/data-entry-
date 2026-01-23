@@ -6,7 +6,7 @@ import { useCarton } from '../context/CartonContext';
 import { sortSizes } from '../utils/sizeSorter';
 
 const AdminPanel = ({ user }) => {
-    const { cartons } = useCarton();
+    const { cartons, clearCartons } = useCarton();
     const [season, setSeason] = useState('WINTER 2025');
     const [extraSizes, setExtraSizes] = useState([]);
     const [newSize, setNewSize] = useState('');
@@ -156,6 +156,13 @@ const AdminPanel = ({ user }) => {
         }
     };
 
+    const handleNewSheet = () => {
+        if (window.confirm("Start a New Sheet? This will clear all current carton data to start fresh.")) {
+            clearCartons();
+            alert("New Sheet Created (Data Cleared). Ready for new entries.");
+        }
+    };
+
     const handleDownloadExcel = async () => {
         try {
             if (cartons.length === 0) {
@@ -177,11 +184,11 @@ const AdminPanel = ({ user }) => {
                 <div className="flex gap-4">
                     {user?.role === 'admin' && (
                         <button
-                            onClick={handleDownloadExcel}
+                            onClick={handleNewSheet}
                             className="group bg-black hover:bg-gray-900 text-white shadow-xl flex items-center gap-3 px-8 py-4 rounded-full font-bold text-xl transition-all transform hover:-translate-y-1 active:scale-95 border-2 border-gray-800"
                         >
-                            <span className="text-3xl group-hover:rotate-12 transition-transform">📊</span>
-                            <span>New Excel</span>
+                            <span className="text-3xl group-hover:rotate-12 transition-transform">�</span>
+                            <span>New Sheet</span>
                         </button>
                     )}
                     <button
