@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BUYER_OPTIONS, SIZES, PRINT_OPTIONS, STYLE_OPTIONS } from '../utils/constants';
+import { useCarton } from '../context/CartonContext';
 // generateExcel removed from here, moved to Admin logic implicitly via API, but we don't need to import it here anymore unless for client side fallback (which isn't requested).
 
 import { sortSizes } from '../utils/sizeSorter';
@@ -16,7 +17,13 @@ const DataEntry = ({ user }) => {
     const [dynamicSizes, setDynamicSizes] = useState(SIZES);
 
     // Session Cartons Logic
+    const { addCarton, clearCartons, cartons } = useCarton();
     const [cartonCount, setCartonCount] = useState(0);
+
+    // Sync count from context
+    useEffect(() => {
+        setCartonCount(cartons.length);
+    }, [cartons]);
 
     React.useEffect(() => {
         // Fetch options
@@ -57,14 +64,9 @@ const DataEntry = ({ user }) => {
         fetchCartonCount();
     }, []);
 
+    // Fetch carton count (replaced by context sync)
     const fetchCartonCount = async () => {
-        try {
-            const res = await fetch('/api/cartons');
-            if (res.ok) {
-                const data = await res.json();
-                setCartonCount(data.length);
-            }
-        } catch (e) { console.error(e); }
+        // No-op for context
     };
 
     // Rows for CURRENT carton
@@ -131,17 +133,12 @@ const DataEntry = ({ user }) => {
 
     const handleReset = async () => {
         if (window.confirm("Are you sure you want to CLEAR ALL SESSION DATA? This will delete all saved cartons from the Admin Export list.")) {
-            try {
-                const res = await fetch('/api/cartons/clear', { method: 'POST' });
-                if (res.ok) {
-                    setBuyer('');
-                    setStoreName('');
-                    setRows([createEmptyRow()]);
-                    setCartonDetails({ cartonNo: '', measurement: '', netWeight: '', grossWeight: '' });
-                    setCartonCount(0);
-                    alert("Session Cleared.");
-                }
-            } catch (e) { alert("Failed to clear session"); }
+            clearCartons();
+            setBuyer('');
+            setStoreName('');
+            setRows([createEmptyRow()]);
+            setCartonDetails({ cartonNo: '', measurement: '', netWeight: '', grossWeight: '' });
+            alert("Session Cleared.");
         }
     };
 
@@ -166,30 +163,22 @@ const DataEntry = ({ user }) => {
         };
 
         try {
-            const res = await fetch('/api/cartons', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(currentCarton)
-            });
+            // Save via Context instead of API
+            addCarton(currentCarton);
 
-            if (res.ok) {
-                setRows([createEmptyRow()]);
-                // Keep buyer/store/measurement populated
-                setCartonDetails({
-                    cartonNo: '',
-                    measurement: cleanMeasurement,
-                    netWeight: '',
-                    grossWeight: ''
-                });
-                fetchCartonCount();
-                alert("Carton Saved!");
-            } else {
-                const errData = await res.json();
-                alert(`Failed to save carton: ${errData.error || 'Unknown error'}`);
-            }
+            setRows([createEmptyRow()]);
+            // Keep buyer/store/measurement populated
+            setCartonDetails({
+                cartonNo: '',
+                measurement: cleanMeasurement,
+                netWeight: '',
+                grossWeight: ''
+            });
+            alert("Carton Saved!");
+
         } catch (e) {
             console.error(e);
-            alert("Network error saving carton.");
+            alert("Error saving carton.");
         }
     };
 

@@ -1,10 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { generateExcel } from '../utils/excelGenerator';
+import { useCarton } from '../context/CartonContext';
 
 import { sortSizes } from '../utils/sizeSorter';
 
 const AdminPanel = ({ user }) => {
+    const { cartons } = useCarton();
     const [season, setSeason] = useState('WINTER 2025');
     const [extraSizes, setExtraSizes] = useState([]);
     const [newSize, setNewSize] = useState('');
@@ -156,15 +158,11 @@ const AdminPanel = ({ user }) => {
 
     const handleDownloadExcel = async () => {
         try {
-            const res = await fetch('/api/cartons');
-            if (res.ok) {
-                const cartons = await res.json();
-                if (cartons.length === 0) {
-                    alert("No saved cartons found. Please complete Data Entry first.");
-                    return;
-                }
-                generateExcel(cartons, season);
+            if (cartons.length === 0) {
+                alert("No saved cartons found. Please complete Data Entry first.");
+                return;
             }
+            generateExcel(cartons, season);
         } catch (e) {
             console.error(e);
             alert("Failed to export.");
