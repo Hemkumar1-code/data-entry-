@@ -4,8 +4,10 @@ import * as XLSX from 'xlsx';
  * Generates an Excel workbook with one sheet per carton.
  * Strict formatting rules applied.
  */
-export const generateExcel = (cartons, season = "WINTER 2025") => {
+export const generateExcel = (cartons, settings = {}) => {
     if (!cartons || cartons.length === 0) return;
+
+    const { activeSeason, lockedByAdmin } = settings;
 
     const wb = XLSX.utils.book_new();
     const totalCartons = cartons.length;
@@ -33,7 +35,7 @@ export const generateExcel = (cartons, season = "WINTER 2025") => {
         // 2. BUILD VERTICAL HEADER
         const rows = [
             ["CARTON No.", `${cartonNum} OF ${totalCartons}`],
-            ["SEASON", season],
+            ["SEASON", lockedByAdmin ? activeSeason : (carton.season || activeSeason)],
             ["STORE NAME", carton.storeName || ""],
             ["COLOUR", colourVal],
             ["STYLE", styleVal],

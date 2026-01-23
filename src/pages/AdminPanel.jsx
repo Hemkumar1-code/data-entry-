@@ -6,8 +6,13 @@ import { useCarton } from '../context/CartonContext';
 import { sortSizes } from '../utils/sizeSorter';
 
 const AdminPanel = ({ user }) => {
-    const { cartons, clearCartons } = useCarton();
-    const [season, setSeason] = useState('WINTER 2025');
+    const { cartons, clearCartons, settings, updateSettings } = useCarton();
+    const [localSeason, setLocalSeason] = useState(settings.activeSeason);
+
+    // Sync local input with global settings on mount/change
+    useEffect(() => {
+        setLocalSeason(settings.activeSeason);
+    }, [settings.activeSeason]);
     const [extraSizes, setExtraSizes] = useState([]);
     const [newSize, setNewSize] = useState('');
     const [uploadedFiles, setUploadedFiles] = useState([]);
@@ -35,16 +40,8 @@ const AdminPanel = ({ user }) => {
     };
 
     const handleUpdateSeason = async () => {
-        try {
-            await fetch('/api/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ activeSeason: season, extraSizes })
-            });
-            alert("Active Season Updated!");
-        } catch (e) {
-            alert("Failed to update season");
-        }
+        updateSettings({ activeSeason: localSeason, lockedByAdmin: true });
+        alert("Active Season Updated (Locked for Data Entry Users)!");
     };
 
     const handleAddSize = async () => {
@@ -169,7 +166,8 @@ const AdminPanel = ({ user }) => {
                 alert("No saved cartons found. Please complete Data Entry first.");
                 return;
             }
-            generateExcel(cartons, season);
+            // Pass global settings to generator
+            generateExcel(cartons, settings);
         } catch (e) {
             console.error(e);
             alert("Failed to export.");
@@ -212,8 +210,8 @@ const AdminPanel = ({ user }) => {
                             <div className="flex gap-2">
                                 <input
                                     className="form-input font-bold text-lg"
-                                    value={season}
-                                    onChange={(e) => setSeason(e.target.value)}
+                                    value={localSeason}
+                                    onChange={(e) => setLocalSeason(e.target.value)}
                                 />
                                 <button onClick={handleUpdateSeason} className="btn btn-primary whitespace-nowrap">
                                     Update Active Season

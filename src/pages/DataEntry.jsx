@@ -157,8 +157,8 @@ const DataEntry = ({ user }) => {
         const currentCarton = {
             buyer,
             storeName,
-            rows,
             ...cartonDetails,
+            season: settings.lockedByAdmin ? settings.activeSeason : userSeason,
             measurement: cleanMeasurement
         };
 
@@ -196,7 +196,16 @@ const DataEntry = ({ user }) => {
             </div>
 
             {/* Top Section */}
-            <div className="card mb-6 grid grid-cols-1 md:grid-cols-2 gap-6 bg-white">
+            <div className="card mb-6 grid grid-cols-1 md:grid-cols-3 gap-6 bg-white">
+                <div className="input-group">
+                    <label className="input-label">Season {settings.lockedByAdmin && <span className="text-xs text-blue-600">(Admin Locked)</span>}</label>
+                    <input
+                        className={`form-input font-bold ${settings.lockedByAdmin ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                        value={settings.lockedByAdmin ? settings.activeSeason : userSeason}
+                        onChange={e => !settings.lockedByAdmin && setUserSeason(e.target.value)}
+                        readOnly={settings.lockedByAdmin}
+                    />
+                </div>
                 <div className="input-group">
                     <label className="input-label">Buyer <span className="text-red-500">*</span></label>
                     <select

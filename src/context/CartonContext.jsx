@@ -16,6 +16,21 @@ export const CartonProvider = ({ children }) => {
         }
     });
 
+    // Global Settings (Active Season, etc)
+    const [settings, setSettings] = useState(() => {
+        try {
+            const saved = localStorage.getItem('carton_settings');
+            return saved ? JSON.parse(saved) : { activeSeason: 'WINTER 2025', lockedByAdmin: false };
+        } catch (e) {
+            return { activeSeason: 'WINTER 2025', lockedByAdmin: false };
+        }
+    });
+
+    // Save Settings
+    useEffect(() => {
+        localStorage.setItem('carton_settings', JSON.stringify(settings));
+    }, [settings]);
+
     // Save to LocalStorage whenever cartons change
     useEffect(() => {
         try {
@@ -41,8 +56,12 @@ export const CartonProvider = ({ children }) => {
         localStorage.removeItem('carton_data');
     };
 
+    const updateSettings = (newSettings) => {
+        setSettings(prev => ({ ...prev, ...newSettings }));
+    };
+
     return (
-        <CartonContext.Provider value={{ cartons, addCarton, clearCartons }}>
+        <CartonContext.Provider value={{ cartons, addCarton, clearCartons, settings, updateSettings }}>
             {children}
         </CartonContext.Provider>
     );
