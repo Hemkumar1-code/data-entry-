@@ -1,4 +1,4 @@
-import pool from './_utils/sqlConnect.js';
+import { GOOGLE_SCRIPT_URL } from '../src/utils/constants.js';
 
 export default async function handler(req, res) {
     // CORS Headers
@@ -10,69 +10,43 @@ export default async function handler(req, res) {
         'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
     );
 
-    // Handle OPTIONS request for CORS preflight
     if (req.method === 'OPTIONS') {
         res.status(200).end();
         return;
     }
 
+    // Check if URL is configured
+    if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes("YOUR_DEPLOYMENT_ID")) {
+        console.error("GOOGLE_SCRIPT_URL is not configured in src/utils/constants.js");
+        return res.status(500).json({
+            error: "Backend Setup Required: Please add your Google Web App URL to src/utils/constants.js"
+        });
+    }
+
     if (req.method === 'GET') {
         try {
-            // Ensure table exists (lazy init for smoother UX, though prod should use migrations)
-            await pool.query(`
-                CREATE TABLE IF NOT EXISTS cartons (
-                    id SERIAL PRIMARY KEY,
-                    buyer TEXT,
-                    store_name TEXT,
-                    carton_no TEXT,
-                    measurement TEXT,
-                    net_weight TEXT,
-                    gross_weight TEXT,
-                    rows_data JSONB,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-                );
-            `);
-
-            const { rows } = await pool.query('SELECT * FROM cartons ORDER BY created_at ASC');
-
-            // Map Snake_Case DB columns to CamelCase JSON
-            const formatted = rows.map(r => ({
-                _id: r.id,
-                buyer: r.buyer,
-                storeName: r.store_name,
-                cartonNo: r.carton_no,
-                measurement: r.measurement,
-                netWeight: r.net_weight,
-                grossWeight: r.gross_weight,
-                rows: r.rows_data,
-                timestamp: r.created_at
-            }));
-
-            res.status(200).json(formatted);
+            const googleRes = await fetch(GOOGLE_SCRIPT_URL);
+            if (!googleRes.ok) throw new Error("Failed to fetch from Google Sheets");
+            const data = await googleRes.json();
+            res.status(200).json(data);
         } catch (err) {
             console.error(err);
-            res.status(500).json({ error: err.message });
+            res.status(500).json({ error: "Failed to connect to Google Sheet database" });
         }
     } else if (req.method === 'POST') {
         try {
-            const { buyer, storeName, cartonNo, measurement, netWeight, grossWeight, rows } = req.body;
-
-            const query = `
-                INSERT INTO cartons (buyer, store_name, carton_no, measurement, net_weight, gross_weight, rows_data)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                RETURNING *;
-            `;
-            const values = [buyer, storeName, cartonNo, measurement, netWeight, grossWeight, JSON.stringify(rows)];
-
-            const { rows: resultRows } = await pool.query(query, values);
-            const r = resultRows[0];
-
-            res.status(200).json({
-                success: true,
-                _id: r.id,
-                buyer: r.buyer,
-                // ... return other fields if needed by frontend immediately
+            const googleRes = await fetch(GOOGLE_SCRIPT_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(req.body)
             });
+
+            if (!googleRes.ok) throw new Error("Failed to save to Google Sheets");
+            const result = await googleRes.json();
+
+            if (result.error) throw new Error(result.error);
+
+            res.status(200).json({ success: true });
         } catch (err) {
             console.error(err);
             res.status(500).json({ error: err.message });
