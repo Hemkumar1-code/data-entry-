@@ -6,13 +6,13 @@ import { useCarton } from '../context/CartonContext';
 import { sortSizes } from '../utils/sizeSorter';
 
 const AdminPanel = ({ user }) => {
-    const { cartons, clearCartons, settings, updateSettings } = useCarton();
-    const [localSeason, setLocalSeason] = useState(settings.activeSeason);
+    const { cartons, clearCartons, settings = {}, updateSettings } = useCarton();
+    const [localSeason, setLocalSeason] = useState(settings?.activeSeason || 'WINTER 2025');
 
     // Sync local input with global settings on mount/change
     useEffect(() => {
-        setLocalSeason(settings.activeSeason);
-    }, [settings.activeSeason]);
+        if (settings?.activeSeason) setLocalSeason(settings.activeSeason);
+    }, [settings?.activeSeason]);
     const [extraSizes, setExtraSizes] = useState([]);
     const [newSize, setNewSize] = useState('');
     const [uploadedFiles, setUploadedFiles] = useState([]);
