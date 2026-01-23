@@ -18,7 +18,7 @@ const DataEntry = ({ user }) => {
 
     // Session Cartons Logic
     const { addCarton, clearCartons, cartons, settings = {} } = useCarton();
-    const [userSeason, setUserSeason] = useState(settings?.activeSeason || 'WINTER 2025');
+    // const [userSeason, setUserSeason] = useState(settings?.activeSeason || 'WINTER 2025'); // Removed per strict request
     const [cartonCount, setCartonCount] = useState(0);
 
     // Sync count from context
@@ -135,7 +135,8 @@ const DataEntry = ({ user }) => {
             buyer,
             storeName,
             ...cartonDetails,
-            season: settings?.lockedByAdmin ? settings.activeSeason : userSeason,
+            ...cartonDetails,
+            season: settings?.activeSeason || 'WINTER 2025', // Always use global season
             measurement: cleanMeasurement
         };
 
@@ -175,12 +176,11 @@ const DataEntry = ({ user }) => {
             {/* Top Section */}
             <div className="card mb-6 grid grid-cols-1 md:grid-cols-3 gap-6 bg-white">
                 <div className="input-group">
-                    <label className="input-label">Season {settings?.lockedByAdmin && <span className="text-xs text-blue-600">(Admin Locked)</span>}</label>
+                    <label className="input-label">Season <span className="text-xs text-blue-600">(Read Only)</span></label>
                     <input
-                        className={`form-input font-bold ${settings?.lockedByAdmin ? 'bg-gray-100 cursor-not-allowed' : ''}`}
-                        value={settings?.lockedByAdmin ? settings.activeSeason : userSeason}
-                        onChange={e => !settings?.lockedByAdmin && setUserSeason(e.target.value)}
-                        readOnly={settings?.lockedByAdmin}
+                        className="form-input font-bold bg-gray-100 cursor-not-allowed text-slate-600"
+                        value={settings?.activeSeason || 'WINTER 2025'}
+                        readOnly
                     />
                 </div>
                 <div className="input-group">
