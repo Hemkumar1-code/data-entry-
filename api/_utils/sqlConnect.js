@@ -4,8 +4,9 @@ const { Pool } = pg;
 const POSTGRES_URL = process.env.POSTGRES_URL || process.env.DATABASE_URL;
 
 if (!POSTGRES_URL) {
-    // We don't throw here to allow build to pass, but API calls will fail if missing
-    console.warn('POSTGRES_URL is not defined');
+    throw new Error(
+        'POSTGRES_URL environment variable is missing. Please add it to your .env.local (local) or Vercel Environment Variables.'
+    );
 }
 
 // Global cache to prevent exhaustive connections in serverless (dev mode mainly)
