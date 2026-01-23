@@ -184,7 +184,8 @@ const DataEntry = ({ user }) => {
                 fetchCartonCount();
                 alert("Carton Saved!");
             } else {
-                alert("Failed to save carton.");
+                const errData = await res.json();
+                alert(`Failed to save carton: ${errData.error || 'Unknown error'}`);
             }
         } catch (e) {
             console.error(e);

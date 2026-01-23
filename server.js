@@ -484,7 +484,10 @@ app.post('/api/cartons', async (req, res) => {
     try {
         const carton = await DB.saveCarton(req.body);
         res.json(carton);
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) {
+        console.error("Error saving carton:", err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.get('/api/cartons', async (req, res) => {
