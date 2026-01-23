@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { loginUser } from '../utils/auth';
 
+import { useNavigate } from 'react-router-dom';
+
 const Login = ({ onLogin }) => {
+    const navigate = useNavigate();
     const [email, setEmail] = useState('');
     const [error, setError] = useState('');
 
@@ -10,6 +13,7 @@ const Login = ({ onLogin }) => {
         const user = loginUser(email.trim());
         if (user) {
             onLogin(user);
+            navigate('/data-entry'); // Force navigation
         } else {
             setError('Access Denied. Invalid email address.');
         }

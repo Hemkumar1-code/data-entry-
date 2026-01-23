@@ -20,7 +20,8 @@ export const CartonProvider = ({ children }) => {
     const [settings, setSettings] = useState(() => {
         try {
             const saved = localStorage.getItem('carton_settings');
-            return saved ? JSON.parse(saved) : { activeSeason: 'WINTER 2025', lockedByAdmin: false };
+            const parsed = saved ? JSON.parse(saved) : null;
+            return parsed || { activeSeason: 'WINTER 2025', lockedByAdmin: false };
         } catch (e) {
             return { activeSeason: 'WINTER 2025', lockedByAdmin: false };
         }
