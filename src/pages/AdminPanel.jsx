@@ -21,9 +21,10 @@ const AdminPanel = ({ user }) => {
     const [uploadError, setUploadError] = useState(null);
 
     // Load files and settings on mount
+    // Load files and settings on mount
     useEffect(() => {
-        fetchFiles();
-        fetchSettings();
+        // No files to fetch (backend removed)
+        setUploadedFiles([]);
     }, []);
 
     const fetchSettings = async () => {
@@ -57,30 +58,13 @@ const AdminPanel = ({ user }) => {
         setExtraSizes(updatedSizes);
         setNewSize('');
 
-        // Save immediately
-        try {
-            await fetch('/api/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ activeSeason: season, extraSizes: updatedSizes })
-            });
-            alert(`Size ${newSize} added!`);
-        } catch (e) {
-            alert("Failed to save size");
-        }
+        // Save global settings via Context
+        updateSettings({ extraSizes: updatedSizes });
+        alert(`Size ${newSize} added!`);
     };
 
-    const fetchFiles = async () => {
-        try {
-            const res = await fetch('/api/files');
-            if (res.ok) {
-                const data = await res.json();
-                setUploadedFiles(data);
-            }
-        } catch (e) {
-            console.error("Failed to load files", e);
-        }
-    };
+    // Removed fetchFiles and handleFileUpload as backend is gone
+    const fetchFiles = () => { };
 
     const handleFileUpload = async (e) => {
         setIsProcessing(true);

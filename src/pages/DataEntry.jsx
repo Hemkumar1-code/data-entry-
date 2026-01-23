@@ -26,43 +26,19 @@ const DataEntry = ({ user }) => {
     }, [cartons]);
 
     React.useEffect(() => {
-        // Fetch options
-        fetch('/api/aggregated')
-            .then(res => res.json())
-            .then(data => {
-                const combinedPrints = Array.from(new Set([...PRINT_OPTIONS, ...(data.prints || [])]))
-                    .filter(p => !/Ta(p|pp)ing/i.test(p)) // Remove Tapping/Taping options
-                    .sort();
-                setPrintOptions(combinedPrints);
+        // use constants directly since API is gone
+        setPrintOptions(PRINT_OPTIONS);
+        setStyleOptions(STYLE_OPTIONS);
+        setStoreOptions([]); // Or define constant STORE_OPTIONS if needed
+        setDynamicSizes(sortSizes(SIZES));
 
-                const combinedStyles = Array.from(new Set([...STYLE_OPTIONS, ...(data.styles || [])])).sort();
-                setStyleOptions(combinedStyles);
+        // Settings are now handled by CartonContext (global settings)
+        if (settings?.extraSizes) {
+            const allSizes = [...SIZES, ...settings.extraSizes];
+            setDynamicSizes(sortSizes([...new Set(allSizes)]));
+        }
 
-                setStoreOptions(data.stores || []);
-            })
-            .catch(err => console.error("Failed to load options", err));
-
-        // Fetch settings for Extra Sizes
-        fetch('/api/settings')
-            .then(res => res.json())
-            .then(data => {
-                if (data.extraSizes && data.extraSizes.length > 0) {
-                    const allSizes = [...SIZES, ...data.extraSizes];
-                    // Remove duplicates
-                    const uniqueSizes = Array.from(new Set(allSizes));
-                    // Sort
-                    const sortedSizes = sortSizes(uniqueSizes);
-                    setDynamicSizes(sortedSizes);
-                } else {
-                    // Even if no extra sizes, let's sort the default ones just in case constants changed order
-                    setDynamicSizes(sortSizes(SIZES));
-                }
-            })
-            .catch(err => console.error("Failed to load settings", err));
-
-        // Fetch carton count
-        fetchCartonCount();
-    }, []);
+    }, [settings]);
 
     // Fetch carton count (replaced by context sync)
     const fetchCartonCount = async () => {
