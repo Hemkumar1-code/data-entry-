@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "activeSeason": "WINTER 2025",
+    "extraSizes": [
+      "49"
+    ],
+    "isSettings": true,
+    "_id": "global_settings"
+  }
+]

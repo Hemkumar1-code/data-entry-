@@ -36,7 +36,7 @@ function App() {
                 path="/admin"
                 element={
                   user.role === 'admin' ? (
-                    <AdminPanel />
+                    <AdminPanel user={user} />
                   ) : (
                     <Navigate to="/data-entry" replace />
                   )

@@ -65,6 +65,13 @@ const CartonSchema = new mongoose.Schema({
 });
 const Carton = mongoose.model('Carton', CartonSchema);
 
+const SettingsSchema = new mongoose.Schema({
+    activeSeason: String,
+    extraSizes: [String],
+    _id: { type: String, default: 'global_settings' } // Singleton
+});
+const Settings = mongoose.model('Settings', SettingsSchema);
+
 // --- DB ADAPTER ---
 const DB = {
     async getAll() {
@@ -136,6 +143,33 @@ const DB = {
             const filtered = records.filter(r => !r.isCarton); // Keep files, remove cartons (if mixed)
             writeLocalDB(filtered);
             return { message: 'Cleared' };
+        }
+    },
+
+    // --- SETTINGS METHODS ---
+    async getSettings() {
+        const DEFAULT_SETTINGS = { activeSeason: "WINTER 2025", extraSizes: [] };
+        if (useMongoDB && mongoose.connection.readyState === 1) {
+            const s = await Settings.findById('global_settings');
+            return s || DEFAULT_SETTINGS;
+        } else {
+            const records = readLocalDB();
+            const s = records.find(r => r.isSettings);
+            return s || DEFAULT_SETTINGS;
+        }
+    },
+    async saveSettings(data) {
+        if (useMongoDB && mongoose.connection.readyState === 1) {
+            // Upsert
+            return await Settings.findByIdAndUpdate('global_settings', { ...data, _id: 'global_settings' }, { new: true, upsert: true });
+        } else {
+            const records = readLocalDB();
+            // Remove old settings
+            const filtered = records.filter(r => !r.isSettings);
+            const newSettings = { ...data, isSettings: true, _id: 'global_settings' };
+            filtered.push(newSettings);
+            writeLocalDB(filtered);
+            return newSettings;
         }
     }
 };
@@ -464,6 +498,21 @@ app.post('/api/cartons/clear', async (req, res) => {
     try {
         await DB.clearCartons();
         res.json({ message: 'All cartons cleared' });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- SETTINGS ENDPOINTS ---
+app.get('/api/settings', async (req, res) => {
+    try {
+        const settings = await DB.getSettings();
+        res.json(settings);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/settings', async (req, res) => {
+    try {
+        const settings = await DB.saveSettings(req.body);
+        res.json(settings);
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

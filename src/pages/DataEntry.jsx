@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { BUYER_OPTIONS, SIZES, PRINT_OPTIONS, STYLE_OPTIONS } from '../utils/constants';
 // generateExcel removed from here, moved to Admin logic implicitly via API, but we don't need to import it here anymore unless for client side fallback (which isn't requested).
 
+import { sortSizes } from '../utils/sizeSorter';
+
 const DataEntry = ({ user }) => {
     const [buyer, setBuyer] = useState('');
     const [storeName, setStoreName] = useState('');
@@ -9,6 +11,9 @@ const DataEntry = ({ user }) => {
     const [printOptions, setPrintOptions] = useState(PRINT_OPTIONS);
     const [styleOptions, setStyleOptions] = useState(STYLE_OPTIONS);
     const [storeOptions, setStoreOptions] = useState([]);
+
+    // Dynamic Sizes from Settings
+    const [dynamicSizes, setDynamicSizes] = useState(SIZES);
 
     // Session Cartons Logic
     const [cartonCount, setCartonCount] = useState(0);
@@ -27,6 +32,24 @@ const DataEntry = ({ user }) => {
                 setStoreOptions(data.stores || []);
             })
             .catch(err => console.error("Failed to load options", err));
+
+        // Fetch settings for Extra Sizes
+        fetch('/api/settings')
+            .then(res => res.json())
+            .then(data => {
+                if (data.extraSizes && data.extraSizes.length > 0) {
+                    const allSizes = [...SIZES, ...data.extraSizes];
+                    // Remove duplicates
+                    const uniqueSizes = Array.from(new Set(allSizes));
+                    // Sort
+                    const sortedSizes = sortSizes(uniqueSizes);
+                    setDynamicSizes(sortedSizes);
+                } else {
+                    // Even if no extra sizes, let's sort the default ones just in case constants changed order
+                    setDynamicSizes(sortSizes(SIZES));
+                }
+            })
+            .catch(err => console.error("Failed to load settings", err));
 
         // Fetch carton count
         fetchCartonCount();
@@ -58,7 +81,7 @@ const DataEntry = ({ user }) => {
             id: Date.now(),
             print: '',
             style: '',
-            sizes: SIZES.reduce((acc, size) => ({ ...acc, [size]: '' }), {}),
+            sizes: dynamicSizes.reduce((acc, size) => ({ ...acc, [size]: '' }), {}),
             totalPcs: 0
         };
     }
@@ -214,7 +237,7 @@ const DataEntry = ({ user }) => {
                         <tr>
                             <th className="w-24">Print</th>
                             <th className="w-24">Style</th>
-                            {SIZES.map(s => <th key={s} className="w-12 text-center">{s}</th>)}
+                            {dynamicSizes.map(s => <th key={s} className="w-12 text-center">{s}</th>)}
                             <th className="w-20">Total</th>
                             <th className="w-10"></th>
                         </tr>
@@ -246,11 +269,11 @@ const DataEntry = ({ user }) => {
                                         ))}
                                     </select>
                                 </td>
-                                {SIZES.map(size => (
+                                {dynamicSizes.map(size => (
                                     <td key={size} className="p-1">
                                         <input
                                             className="w-full text-center border-b border-gray-100 focus:border-blue-500 outline-none p-1"
-                                            value={row.sizes[size]}
+                                            value={row.sizes[size] || ''}
                                             onChange={e => handleSizeChange(row.id, size, e.target.value)}
                                             placeholder=""
                                         />
@@ -282,7 +305,7 @@ const DataEntry = ({ user }) => {
             {/* Global Carton Details */}
             <div className="card mb-6">
                 <h3 className="font-bold text-gray-700 mb-4">Global Carton Details</h3>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                     <div className="input-group">
                         <label className="input-label">Carton No.</label>
                         <input
@@ -314,6 +337,14 @@ const DataEntry = ({ user }) => {
                             placeholder="e.g. 60x40x30"
                             value={cartonDetails.measurement}
                             onChange={e => setCartonDetails({ ...cartonDetails, measurement: e.target.value })}
+                        />
+                    </div>
+                    <div className="input-group">
+                        <label className="input-label">Total Pcs</label>
+                        <input
+                            className="form-input bg-gray-100 text-gray-600 cursor-not-allowed font-bold"
+                            value={rows.reduce((sum, r) => sum + (r.totalPcs || 0), 0)}
+                            readOnly
                         />
                     </div>
                 </div>

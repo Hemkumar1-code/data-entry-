@@ -2,17 +2,74 @@
 import React, { useState, useEffect } from 'react';
 import { generateExcel } from '../utils/excelGenerator';
 
-const AdminPanel = () => {
+import { sortSizes } from '../utils/sizeSorter';
+
+const AdminPanel = ({ user }) => {
     const [season, setSeason] = useState('WINTER 2025');
+    const [extraSizes, setExtraSizes] = useState([]);
+    const [newSize, setNewSize] = useState('');
     const [uploadedFiles, setUploadedFiles] = useState([]);
     const [isProcessing, setIsProcessing] = useState(false);
     const [viewingFile, setViewingFile] = useState(null);
     const [uploadError, setUploadError] = useState(null);
 
-    // Load files from Server on mount
+    // Load files and settings on mount
     useEffect(() => {
         fetchFiles();
+        fetchSettings();
     }, []);
+
+    const fetchSettings = async () => {
+        try {
+            const res = await fetch('/api/settings');
+            if (res.ok) {
+                const data = await res.json();
+                if (data.activeSeason) setSeason(data.activeSeason);
+                if (data.extraSizes) setExtraSizes(data.extraSizes);
+            }
+        } catch (e) {
+            console.error("Failed to load settings", e);
+        }
+    };
+
+    const handleUpdateSeason = async () => {
+        try {
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ activeSeason: season, extraSizes })
+            });
+            alert("Active Season Updated!");
+        } catch (e) {
+            alert("Failed to update season");
+        }
+    };
+
+    const handleAddSize = async () => {
+        if (!newSize) return;
+        // Check for duplicates (case-insensitive)
+        if (extraSizes.some(s => s.toLowerCase() === newSize.trim().toLowerCase())) {
+            alert("Size already exists!");
+            setNewSize('');
+            return;
+        }
+
+        const updatedSizes = [...extraSizes, newSize.trim()];
+        setExtraSizes(updatedSizes);
+        setNewSize('');
+
+        // Save immediately
+        try {
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ activeSeason: season, extraSizes: updatedSizes })
+            });
+            alert(`Size ${newSize} added!`);
+        } catch (e) {
+            alert("Failed to save size");
+        }
+    };
 
     const fetchFiles = async () => {
         try {
@@ -119,97 +176,73 @@ const AdminPanel = () => {
             {/* Header / Export Section */}
             <div className="flex justify-between items-center mb-6">
                 <h1 className="text-2xl font-bold text-slate-800">Admin Dashboard</h1>
-                <button
-                    onClick={handleDownloadExcel}
-                    className="group bg-green-700 hover:bg-green-800 text-white shadow-2xl flex items-center gap-3 px-8 py-4 rounded-full font-bold text-xl transition-all transform hover:-translate-y-1 active:scale-95 border-4 border-green-600/30"
-                >
-                    <span className="text-3xl group-hover:rotate-12 transition-transform">📄</span>
-                    <span>Download Shipping Manifest</span>
-                </button>
+                <div className="flex gap-4">
+                    {user?.role === 'admin' && (
+                        <button
+                            onClick={handleDownloadExcel}
+                            className="group bg-black hover:bg-gray-900 text-white shadow-xl flex items-center gap-3 px-8 py-4 rounded-full font-bold text-xl transition-all transform hover:-translate-y-1 active:scale-95 border-2 border-gray-800"
+                        >
+                            <span className="text-3xl group-hover:rotate-12 transition-transform">📊</span>
+                            <span>New Excel</span>
+                        </button>
+                    )}
+                    <button
+                        onClick={handleDownloadExcel}
+                        className="group bg-black hover:bg-gray-900 text-white shadow-xl flex items-center gap-3 px-8 py-4 rounded-full font-bold text-xl transition-all transform hover:-translate-y-1 active:scale-95 border-2 border-gray-800"
+                    >
+                        <span className="text-3xl group-hover:rotate-12 transition-transform">📄</span>
+                        <span>Download Shipping Manifest</span>
+                    </button>
+                </div>
             </div>
 
-            {/* Dashboard Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                <div className="card text-center">
-                    <h3 className="text-slate-500 font-semibold mb-2">Total Uploaded Files</h3>
-                    <p className="text-3xl font-bold text-slate-800">{uploadedFiles.length}</p>
-                </div>
-                <div className="card text-center col-span-2">
-                    <h3 className="text-slate-500 font-semibold mb-2">Active Season</h3>
-                    <input
-                        className="form-input text-center font-bold text-lg"
-                        value={season}
-                        onChange={(e) => setSeason(e.target.value)}
-                    />
-                </div>
+            {/* Dashboard Stats & Settings */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+
+
+                {user?.role === 'admin' && (
+                    <div className="card space-y-4">
+                        <div>
+                            <h3 className="text-slate-500 font-semibold mb-2">Active Season</h3>
+                            <div className="flex gap-2">
+                                <input
+                                    className="form-input font-bold text-lg"
+                                    value={season}
+                                    onChange={(e) => setSeason(e.target.value)}
+                                />
+                                <button onClick={handleUpdateSeason} className="btn btn-primary whitespace-nowrap">
+                                    Update Active Season
+                                </button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <h3 className="text-slate-500 font-semibold mb-2">Extra Sizes</h3>
+                            <div className="flex flex-wrap gap-2 mb-2">
+                                {sortSizes(extraSizes).map(s => (
+                                    <span key={s} className="bg-gray-200 px-2 py-1 rounded text-sm font-bold">{s}</span>
+                                ))}
+                            </div>
+                            <div className="flex gap-2">
+                                <input
+                                    className="form-input w-24"
+                                    placeholder="Size"
+                                    value={newSize}
+                                    onChange={(e) => setNewSize(e.target.value)}
+                                />
+                                <button onClick={handleAddSize} className="btn btn-secondary whitespace-nowrap">
+                                    Add Extra Size
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Upload Module Removed as per request */}
 
             {/* File List */}
-            {uploadedFiles.length > 0 && (
-                <div className="card mb-6">
-                    <h3 className="font-bold text-lg mb-4">Uploaded Files ({uploadedFiles.length})</h3>
-                    <div className="overflow-x-auto border border-gray-200 rounded-md">
-                        <table className="data-table">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>File Name</th>
-                                    <th>Status</th>
-                                    <th>Stores</th>
-                                    <th>Rows</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {uploadedFiles.map((file, idx) => (
-                                    <tr key={file._id} className={file.status === 'FAILED' ? 'bg-red-50' : file.status === 'PARTIAL' ? 'bg-yellow-50' : ''}>
-                                        <td>{idx + 1}</td>
-                                        <td>
-                                            <div className="font-bold text-slate-700">{file.fileName}</div>
-                                            {file.errorReason && (
-                                                <div className="text-red-500 text-xs mt-1 max-w-[200px]">{file.errorReason}</div>
-                                            )}
-                                        </td>
-                                        <td>
-                                            <span className={`px-2 py-1 rounded text-xs font-bold ${file.status === 'SUCCESS' ? 'bg-green-100 text-green-700' :
-                                                file.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700' :
-                                                    'bg-red-100 text-red-700'
-                                                }`}>
-                                                {file.status || 'SUCCESS'}
-                                            </span>
-                                        </td>
-                                        <td>
-                                            {file.stores && file.stores.length > 0
-                                                ? <span title={file.stores.join(', ')}>{file.stores.length} Found</span>
-                                                : <span className="text-gray-400 italic text-xs">None</span>
-                                            }
-                                        </td>
-                                        <td>{file.rowCount}</td>
-                                        <td>
-                                            <div className="flex gap-2">
-                                                <button
-                                                    onClick={() => handleViewFile(file)}
-                                                    className="btn btn-secondary text-xs px-2 py-1"
-                                                >
-                                                    View
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteFile(file._id)}
-                                                    className="btn btn-danger text-xs px-2 py-1"
-                                                >
-                                                    Delete
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            )}
+
 
             {/* File View Modal */}
             {viewingFile && (
