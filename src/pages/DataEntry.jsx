@@ -23,7 +23,9 @@ const DataEntry = ({ user }) => {
         fetch('/api/aggregated')
             .then(res => res.json())
             .then(data => {
-                const combinedPrints = Array.from(new Set([...PRINT_OPTIONS, ...(data.prints || [])])).sort();
+                const combinedPrints = Array.from(new Set([...PRINT_OPTIONS, ...(data.prints || [])]))
+                    .filter(p => !/Ta(p|pp)ing/i.test(p)) // Remove Tapping/Taping options
+                    .sort();
                 setPrintOptions(combinedPrints);
 
                 const combinedStyles = Array.from(new Set([...STYLE_OPTIONS, ...(data.styles || [])])).sort();

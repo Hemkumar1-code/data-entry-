@@ -532,7 +532,9 @@ app.get('/api/aggregated', async (req, res) => {
         res.json({
             stores: Array.from(allStores).sort(),
             styles: Array.from(allStyles).sort(),
-            prints: Array.from(allPrints).sort()
+            prints: Array.from(allPrints)
+                .filter(p => !/Ta(p|pp)ing/i.test(p)) // Remove Tapping/Taping options
+                .sort()
         });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
