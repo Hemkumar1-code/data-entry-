@@ -60,6 +60,14 @@ const AdminPanel = ({ user }) => {
         alert("Active Season Updated (Locked for Data Entry Users)!");
     };
 
+    const handleAddSize = async () => {
+        if (!newSize) return;
+        const updated = [...extraSizes, newSize.toUpperCase()];
+        updateSettings({ extraSizes: updated });
+        setNewSize('');
+        alert(`Size ${newSize} added!`);
+    };
+
     // Client-side Excel Parse & Upload
     const handleFileUpload = async (e) => {
         setIsProcessing(true);
@@ -273,6 +281,70 @@ const AdminPanel = ({ user }) => {
                         </div>
                     </div>
                 )}
+            </div>
+
+            {/* File Upload Section */}
+            <div className="card mb-6">
+                <h2 className="text-xl font-bold text-slate-800 mb-4">Upload Data</h2>
+                <div className="flex flex-col gap-4">
+                    {uploadError && <div className="bg-red-100 text-red-700 p-3 rounded font-bold">{uploadError}</div>}
+
+                    <div className="flex items-center justify-center w-full">
+                        <label htmlFor="dropzone-file" className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 ${isProcessing ? 'opacity-50 pointer-events-none' : 'border-gray-300 hover:border-blue-500'}`}>
+                            <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                                {isProcessing ? (
+                                    <p className="text-sm text-gray-500 font-bold animate-pulse">Processing Excel & Syncing to Cloud...</p>
+                                ) : (
+                                    <>
+                                        <svg className="w-8 h-8 mb-4 text-gray-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
+                                            <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2" />
+                                        </svg>
+                                        <p className="mb-2 text-sm text-gray-500"><span className="font-semibold">Click to upload</span> or drag and drop</p>
+                                        <p className="text-xs text-gray-500">Excel Files (XLSX, XLS)</p>
+                                    </>
+                                )}
+                            </div>
+                            <input id="dropzone-file" type="file" className="hidden" accept=".xlsx, .xls" onChange={handleFileUpload} disabled={isProcessing} />
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            {/* Uploaded Files List */}
+            <div className="card">
+                <h2 className="text-xl font-bold text-slate-800 mb-4">Uploaded Files (Cloud Record)</h2>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm text-gray-500">
+                        <thead className="text-xs text-gray-700 uppercase bg-gray-50 border-b">
+                            <tr>
+                                <th className="px-6 py-3">File Name</th>
+                                <th className="px-6 py-3">Entries</th>
+                                <th className="px-6 py-3">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {/* Aggregate cartons by fileName */}
+                            {Object.entries(cartons.reduce((acc, c) => {
+                                acc[c.fileName] = (acc[c.fileName] || 0) + 1;
+                                return acc;
+                            }, {})).map(([fileName, count]) => (
+                                <tr key={fileName} className="bg-white border-b hover:bg-gray-50">
+                                    <td className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{fileName}</td>
+                                    <td className="px-6 py-4">{count}</td>
+                                    <td className="px-6 py-4 flex gap-4">
+                                        <button onClick={() => handleViewFile({ fileName, count })} className="font-medium text-blue-600 hover:underline">View Data</button>
+                                        <button onClick={() => handleDeleteFile(fileName)} className="font-medium text-red-600 hover:underline">Delete</button>
+                                    </td>
+                                </tr>
+                            ))}
+                            {cartons.length === 0 && (
+                                <tr>
+                                    <td colSpan="3" className="px-6 py-4 text-center text-gray-400 font-bold">No files uploaded yet.</td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             {/* View File Modal */}
