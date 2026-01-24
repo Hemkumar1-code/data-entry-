@@ -1,11 +1,12 @@
 import express from 'express';
-import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import Carton from './src/models/Carton.js';
-import Settings from './src/models/Settings.js';
+import * as XLSX from 'xlsx';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
 
@@ -13,7 +14,7 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
-        origin: "*", // Adjust in production
+        origin: "*",
         methods: ["GET", "POST", "DELETE", "PUT"]
     }
 });
@@ -21,29 +22,101 @@ const io = new Server(httpServer, {
 app.use(cors());
 app.use(express.json());
 
-// --- Database Connection ---
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/data-entry-db')
-    .then(() => console.log('✅ MongoDB Connected'))
-    .catch(err => console.error('❌ MongoDB Connection Error:', err));
+// --- Excel Database Logic ---
+const DB_FILE = 'master_db.xlsx';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DB_PATH = path.join(__dirname, DB_FILE);
+
+// Initialize DB if missing
+if (!fs.existsSync(DB_PATH)) {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet([]);
+    XLSX.utils.book_append_sheet(wb, ws, "Cartons");
+
+    // Settings Sheet
+    const wsSettings = XLSX.utils.json_to_sheet([{ activeSeason: 'WINTER 2025', lockedByAdmin: false, extraSizes: "[]" }]);
+    XLSX.utils.book_append_sheet(wb, wsSettings, "Settings");
+
+    XLSX.writeFile(wb, DB_PATH);
+    console.log(`Initialized ${DB_FILE}`);
+}
+
+// Helper: Read Entire DB
+const readDB = () => {
+    const wb = XLSX.readFile(DB_PATH);
+
+    // Cartons
+    let cartons = [];
+    if (wb.Sheets["Cartons"]) {
+        const raw = XLSX.utils.sheet_to_json(wb.Sheets["Cartons"]);
+        // Parse the JSON stringified 'data' column if we use that structure,
+        // OR if we flatten, we read as is. Plan said "Stringifying complex data".
+        // Let's assume schema: { _id, data: JSON_STRING, updatedBy }
+        cartons = raw.map(row => {
+            try {
+                return typeof row.data === 'string' ? JSON.parse(row.data) : row;
+            } catch (e) {
+                return row;
+            }
+        });
+    }
+
+    // Settings
+    let settings = { activeSeason: 'WINTER 2025', extraSizes: [] };
+    if (wb.Sheets["Settings"]) {
+        const rawSettings = XLSX.utils.sheet_to_json(wb.Sheets["Settings"]);
+        if (rawSettings.length > 0) {
+            const s = rawSettings[0];
+            // Parse extraSizes if stringified
+            if (typeof s.extraSizes === 'string') {
+                try { s.extraSizes = JSON.parse(s.extraSizes); } catch (e) { }
+            }
+            settings = { ...settings, ...s };
+        }
+    }
+
+    return { cartons, settings };
+};
+
+// Helper: Write DB
+const writeDB = (cartons, settings) => {
+    const wb = XLSX.utils.book_new();
+
+    // 1. Cartons -> Serialize complex objects to avoid Excel destruction
+    const cartonRows = cartons.map(c => ({
+        _id: c._id,
+        timestamp: c.timestamp,
+        // Store full object as JSON string to preserve arrays/nested objects perfecty
+        data: JSON.stringify(c)
+    }));
+    const wsCartons = XLSX.utils.json_to_sheet(cartonRows);
+    XLSX.utils.book_append_sheet(wb, wsCartons, "Cartons");
+
+    // 2. Settings
+    const settingRow = {
+        ...settings,
+        extraSizes: JSON.stringify(settings.extraSizes || [])
+    };
+    const wsSettings = XLSX.utils.json_to_sheet([settingRow]);
+    XLSX.utils.book_append_sheet(wb, wsSettings, "Settings");
+
+    XLSX.writeFile(wb, DB_PATH);
+};
 
 // --- Socket.IO Logic ---
 io.on('connection', (socket) => {
     console.log('🔌 Client Connected:', socket.id);
-
-    // Join room? Not strictly needed for broadcast-all, but good practice
     socket.join('updates');
-
-    socket.on('disconnect', () => {
-        console.log('❌ Client Disconnected:', socket.id);
-    });
+    socket.on('disconnect', () => console.log('❌ Client Disconnected:', socket.id));
 });
 
 // --- API Routes ---
 
 // GET All Cartons
-app.get('/api/cartons', async (req, res) => {
+app.get('/api/cartons', (req, res) => {
     try {
-        const cartons = await Carton.find().sort({ timestamp: 1 });
+        const { cartons } = readDB();
+        // Sort by timestamp if needed, but array order usually preserved
         res.json(cartons);
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -51,37 +124,32 @@ app.get('/api/cartons', async (req, res) => {
 });
 
 // POST (Add/Update) Carton
-app.post('/api/cartons', async (req, res) => {
+app.post('/api/cartons', (req, res) => {
     try {
-        const data = req.body;
-        // Upsert based on _id if present, else create new
-        // Ideally we use PUT for updates, but shared endpoint handling:
-        let saved;
-        if (data._id && mongoose.Types.ObjectId.isValid(data._id)) {
-            saved = await Carton.findByIdAndUpdate(data._id, data, { new: true, upsert: true });
-        } else {
-            // Remove temp ID if it was generated by frontend (e.g. timestamp string)
-            // Or if existing schema uses String IDs, we might keep it.
-            // Let's assume we want Mongoose ObjectIds for real backend.
-            // Frontend sends `_id: Date.now().toString()`. This is NOT a valid ObjectId.
-            // We should strip it and let Mongo generate one, OR use a custom `cartonId`.
-            // Let's strip the temp _id if it's not a valid ObjectId.
-            const { _id, ...cleanData } = data;
-
-            // If frontend _id is 24 chars, use it. If "1732..." (timestamp), drop it.
-            if (_id && mongoose.Types.ObjectId.isValid(_id)) {
-                // Update specific ID
-                saved = await Carton.findByIdAndUpdate(_id, cleanData, { new: true, upsert: true });
-            } else {
-                // New
-                saved = await Carton.create(cleanData);
-            }
+        const newCarton = req.body;
+        // Ensure ID
+        if (!newCarton._id || newCarton._id.length < 10) {
+            newCarton._id = Date.now().toString(); // Simple ID for Excel
         }
 
-        io.to('updates').emit('sync_cartons', { type: 'UPDATE', carton: saved });
-        io.emit('sync_cartons', { type: 'REFRESH_ALL' }); // Simple fallback: tell everyone to re-fetch
+        const { cartons, settings } = readDB();
 
-        res.json(saved);
+        const idx = cartons.findIndex(c => c._id === newCarton._id);
+        if (idx > -1) {
+            cartons[idx] = newCarton;
+        } else {
+            cartons.push(newCarton);
+        }
+
+        writeDB(cartons, settings);
+
+        io.to('updates').emit('sync_cartons', { type: 'UPDATE', carton: newCarton });
+
+        // Notify about Admin update if needed (simple check if user is admin? 
+        // We don't have auth context here easily, but we can assume *any* write triggers refresh for safety
+        // or just rely on 'sync_cartons' which we already have on frontend)
+
+        res.json(newCarton);
     } catch (e) {
         console.error(e);
         res.status(500).json({ error: e.message });
@@ -89,12 +157,15 @@ app.post('/api/cartons', async (req, res) => {
 });
 
 // DELETE Carton
-app.delete('/api/cartons/:id', async (req, res) => {
+app.delete('/api/cartons/:id', (req, res) => {
     try {
-        await Carton.findByIdAndDelete(req.params.id);
+        const { cartons, settings } = readDB();
+        const newCartons = cartons.filter(c => c._id !== req.params.id);
 
-        // Notify clients
-        io.emit('sync_cartons', { type: 'DELETE', id: req.params.id });
+        if (newCartons.length !== cartons.length) {
+            writeDB(newCartons, settings);
+            io.emit('sync_cartons', { type: 'DELETE', id: req.params.id });
+        }
 
         res.json({ success: true });
     } catch (e) {
@@ -103,24 +174,30 @@ app.delete('/api/cartons/:id', async (req, res) => {
 });
 
 // GET Settings
-app.get('/api/settings', async (req, res) => {
+app.get('/api/settings', (req, res) => {
     try {
-        const settings = await Settings.findOne();
-        res.json(settings || { activeSeason: 'WINTER 2025', extraSizes: [] });
+        const { settings } = readDB();
+        res.json(settings);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
 
 // POST Settings
-app.post('/api/settings', async (req, res) => {
+app.post('/api/settings', (req, res) => {
     try {
         const update = req.body;
-        const settings = await Settings.findOneAndUpdate({}, update, { new: true, upsert: true });
+        const { cartons, settings } = readDB();
+        const newSettings = { ...settings, ...update };
 
-        io.emit('sync_settings', settings);
+        writeDB(cartons, newSettings);
 
-        res.json(settings);
+        io.emit('sync_settings', newSettings);
+
+        // If Admin locked season, maybe force refresh?
+        io.emit('admin_refresh_request', { message: "Global Settings Updated" });
+
+        res.json(newSettings);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -134,5 +211,5 @@ app.post('/api/upload', (req, res) => {
 const PORT = 5000;
 httpServer.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
-    console.log(`📡 Socket.IO enabled`);
+    console.log(`📂 Storage: ${DB_FILE}`);
 });
