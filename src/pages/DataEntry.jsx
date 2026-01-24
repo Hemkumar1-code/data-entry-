@@ -328,6 +328,54 @@ const DataEntry = ({ user }) => {
                 </div>
             </div>
 
+            {/* Recent Session Cartons Log - Live Updates */}
+            <div className="card mb-6">
+                <h3 className="font-bold text-gray-700 mb-4 flex justify-between items-center">
+                    <span>Recent Session Entries (Live)</span>
+                    <span className="text-xs text-green-600 font-normal bg-green-50 px-2 py-1 rounded border border-green-200">
+                        ● All updates sync automatically
+                    </span>
+                </h3>
+                <div className="overflow-x-auto max-h-64 border rounded">
+                    <table className="w-full text-left text-sm text-gray-500">
+                        <thead className="bg-gray-50 text-xs text-gray-700 uppercase sticky top-0">
+                            <tr>
+                                <th className="px-4 py-2">Carton #</th>
+                                <th className="px-4 py-2">Store</th>
+                                <th className="px-4 py-2">Total Pcs</th>
+                                <th className="px-4 py-2">Gross Wt</th>
+                                <th className="px-4 py-2">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {cartons.length === 0 ? (
+                                <tr>
+                                    <td colSpan="5" className="px-4 py-8 text-center text-gray-400">
+                                        No entries in this session yet.
+                                    </td>
+                                </tr>
+                            ) : (
+                                [...cartons].reverse().map((c) => (
+                                    <tr key={c._id} className="hover:bg-blue-50 transition-colors">
+                                        <td className="px-4 py-2 font-medium text-gray-900">{c.cartonNo || '-'}</td>
+                                        <td className="px-4 py-2">{c.storeName}</td>
+                                        <td className="px-4 py-2 font-bold text-blue-600">
+                                            {c.rows?.reduce((sum, r) => sum + (parseInt(r.totalPcs) || 0), 0) || 0}
+                                        </td>
+                                        <td className="px-4 py-2">{c.grossWeight} kg</td>
+                                        <td className="px-4 py-2 text-xs">
+                                            <span className="bg-green-100 text-green-800 px-2 py-0.5 rounded-full">
+                                                Synced
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             {/* Bottom Actions */}
             <div className="flex justify-end gap-4 mt-8">
                 <button

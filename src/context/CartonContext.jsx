@@ -87,7 +87,7 @@ export const CartonProvider = ({ children, user }) => {
                 // Only show if we are ONLINE and it's not a local write
                 if (!snapshot.metadata.hasPendingWrites && navigator.onLine && !isLoading) {
                     console.log("🔔 Remote update received for Cartons");
-                    showNotification("Live Update: Session data updated.", "info");
+                    showNotification("Data updated by Admin / System", "info");
                 }
 
                 setCartons(newCartons);
@@ -231,16 +231,16 @@ export const CartonProvider = ({ children, user }) => {
             {/* NOTIFICATIONS (Toast) */}
             {notification && (
                 <div className={`fixed bottom-4 right-4 text-white px-6 py-4 rounded-lg shadow-2xl flex items-center gap-4 z-[9999] animate-bounce-short border-l-4 ${notification.type === 'error' ? 'bg-red-900 border-red-500' :
-                        notification.type === 'success' ? 'bg-green-900 border-green-500' :
-                            'bg-gray-900 border-blue-500'
+                    notification.type === 'success' ? 'bg-green-900 border-green-500' :
+                        'bg-gray-900 border-blue-500'
                     }`}>
                     <span className="text-2xl">
                         {notification.type === 'error' ? '🔌' : notification.type === 'success' ? '⚡' : 'ℹ️'}
                     </span>
                     <div>
                         <h4 className={`font-bold text-sm uppercase ${notification.type === 'error' ? 'text-red-400' :
-                                notification.type === 'success' ? 'text-green-400' :
-                                    'text-blue-400'
+                            notification.type === 'success' ? 'text-green-400' :
+                                'text-blue-400'
                             }`}>
                             {notification.type === 'error' ? 'Offline' : notification.type === 'success' ? 'Online' : 'Update'}
                         </h4>
