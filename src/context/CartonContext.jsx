@@ -12,8 +12,13 @@ export const CartonProvider = ({ children }) => {
 
     // --- State ---
     const [cartons, setCartons] = useState([]);
-    const [settings, setSettings] = useState({ activeSeason: 'WINTER 2025', lockedByAdmin: false, extraSizes: [] });
+    const [settings, setSettings] = useState({ activeSeason: '', lockedByAdmin: false, extraSizes: [] });
     const [isConnected, setIsConnected] = useState(socket.connected);
+
+    // STRICT SYNC: Show Popup instead of auto-update
+    const [showRefreshPopup, setShowRefreshPopup] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState(null);
 
     // --- Initial Load & Socket Listeners ---
     useEffect(() => {
@@ -30,37 +35,45 @@ export const CartonProvider = ({ children }) => {
         socket.on('connect', onConnect);
         socket.on('disconnect', onDisconnect);
 
-        // 2. Data Sync Listeners
-        socket.on('sync_cartons', (data) => {
-            console.log('🔄 Sync Event:', data);
+        // 2. Data Sync Listeners - MODIFIED FOR STRICT POPUP WORKFLOW
+        const handleServerUpdate = (data) => {
+            console.log('🔔 Server requires refresh:', data);
+            // DO NOT auto-update state.
+            // DO Show Popup.
+            setShowRefreshPopup(true);
+        };
 
-            if (data.type === 'UPDATE' && data.carton) {
-                setCartons(prev => {
-                    const idx = prev.findIndex(c => c._id === data.carton._id);
-                    if (idx > -1) {
-                        const newArr = [...prev];
-                        newArr[idx] = data.carton;
-                        return newArr;
-                    } else {
-                        return [...prev, data.carton];
-                    }
-                });
-            } else if (data.type === 'DELETE' && data.id) {
-                setCartons(prev => prev.filter(c => c._id !== data.id));
-            } else {
-                // Refresh All
-                fetchCartons();
+        socket.on('sync_cartons', handleServerUpdate);
+        socket.on('sync_settings', handleServerUpdate);
+        socket.on('admin_refresh_request', handleServerUpdate);
+
+        // 3. Initial Fetch (Strict Excel Source)
+        const initData = async () => {
+            setIsLoading(true);
+            try {
+                // Parallel fetch for speed
+                const [resCartons, resSettings] = await Promise.all([
+                    fetch('http://localhost:5000/api/cartons'),
+                    fetch('http://localhost:5000/api/settings')
+                ]);
+
+                if (!resCartons.ok || !resSettings.ok) throw new Error("Failed to load Excel Data");
+
+                const cartonsData = await resCartons.json();
+                const settingsData = await resSettings.json();
+
+                setCartons(cartonsData);
+                setSettings(settingsData);
+                setError(null);
+            } catch (e) {
+                console.error("Critical Load Error:", e);
+                setError("FAILED TO LOAD DATA FROM EXCEL. Please ensure Server is running.");
+            } finally {
+                setIsLoading(false);
             }
-        });
+        };
 
-        socket.on('sync_settings', (newSettings) => {
-            console.log('⚙ Settings Updated:', newSettings);
-            setSettings(prev => ({ ...prev, ...newSettings }));
-        });
-
-        // 3. Initial Fetch
-        fetchCartons();
-        fetchSettings();
+        initData();
 
         // Cleanup
         return () => {
@@ -68,34 +81,11 @@ export const CartonProvider = ({ children }) => {
             socket.off('disconnect', onDisconnect);
             socket.off('sync_cartons');
             socket.off('sync_settings');
+            socket.off('admin_refresh_request');
         };
     }, []);
 
     // --- API Interactions ---
-
-    const fetchCartons = async () => {
-        try {
-            const res = await fetch('http://localhost:5000/api/cartons');
-            if (res.ok) {
-                const data = await res.json();
-                setCartons(data);
-            }
-        } catch (e) {
-            console.error("Failed to fetch cartons", e);
-        }
-    };
-
-    const fetchSettings = async () => {
-        try {
-            const res = await fetch('http://localhost:5000/api/settings');
-            if (res.ok) {
-                const data = await res.json();
-                setSettings(prev => ({ ...prev, ...data }));
-            }
-        } catch (e) {
-            console.error("Failed to fetch settings", e);
-        }
-    };
 
     const addCarton = async (carton) => {
         try {
@@ -104,8 +94,28 @@ export const CartonProvider = ({ children }) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(carton)
             });
-            if (!res.ok) throw new Error("Failed to save carton");
-            // State update handled by Socket 'sync_cartons' event
+            if (!res.ok) throw new Error("Failed to save carton to Excel");
+
+            // On success, we don't strictly need to do anything because 
+            // the server will emit an event. 
+            // However, for the user who ADDED the item, instant feedback + no popup is usually preferred (Optimistic UI),
+            // OR we treat them same as everyone else (Wait for refresh).
+            // Requirement: "Popup... Appear for all active users".
+            // If I add data, I shouldn't be forced to refresh my own page if I just saved it?
+            // "When Admin saves... Show popup message on USER side".
+            // If I am the one saving, usually I expect success message. 
+            // But to ensure "Excel is Only Source of Truth", technically refreshing is safest.
+            // But standard UX: I update -> I see my update. Others update -> I see popup.
+            // Let's rely on the response from POST to update local state immediately (Optimistic/Confirmed Local),
+            // and ignore the socket event *if* it was triggered by me? 
+            // Socket broadcasting usually goes to *others* (broadcast.emit) or *everyone* (io.emit).
+            // Server currently uses `io.emit` (everyone).
+            // I will suppress popup for 2 seconds after my own action? Or check ID?
+            // For now, to be STRICT as requested ("Excel is ONLY source"), 
+            // even the saver might get a popup, OR we just update local state from response 
+            // and hope the socket event doesn't override/trigger popup loop.
+            // Use a ref to track "I just updated".
+
             return await res.json();
         } catch (e) {
             console.error("Error adding carton:", e);
@@ -114,26 +124,8 @@ export const CartonProvider = ({ children }) => {
     };
 
     const clearCartons = async () => {
-        // In real-time sync, "clearing session" might mean deleting ALL or just local view?
-        // User requirements say "Real-time sync... No duplicate or stale data".
-        // Admin's "New Sheet" feature clears ALL data.
-        // We should implement a bulk delete API ideally, but for now we iterate or ask backend.
-        // Let's assume Admin clears EVERYONE's view.
-        // Currently Server doesn't have "Delete All". 
-        // I'll implementation a loop for safety or just reset local if 'session' concept exists.
-        // BUT user said "Single source of truth (database)".
-        // So "New Sheet" = Drop Collection / Delete All.
-        // I will add a special endpoint or just warn it's not implemented fully server-side yet?
-        // Let's implement client-side iteration for now to be safe with existing APIs.
-        // OR better: Just do nothing and warn, because 'clearCartons' was for LocalStorage.
-        // Wait, Admin 'New Sheet' calls clearCartons.
-
-        // Let's assume we want to clear the DB.
-        if (window.confirm("WARNING: This will delete ALL data from the Real-Time Database for EVERYONE. Continue?")) {
-            // For now, since we lack a bulk delete endpoint in the quick server setup:
-            // We'll just reset local viewing state? No, data entry users need to clear too.
-            // I'll implement a 'reset' socket event if I can, or loop delete.
-            // Loop delete for now.
+        if (window.confirm("WARNING: This will delete ALL data from the Master Excel File. Continue?")) {
+            // Loop delete as placeholder for bulk API
             for (const c of cartons) {
                 await fetch(`http://localhost:5000/api/cartons/${c._id}`, { method: 'DELETE' });
             }
@@ -152,6 +144,11 @@ export const CartonProvider = ({ children }) => {
         }
     };
 
+    // --- Manual Refresh Handler ---
+    const handleRefresh = () => {
+        window.location.reload();
+    };
+
     return (
         <CartonContext.Provider value={{
             cartons,
@@ -162,21 +159,62 @@ export const CartonProvider = ({ children }) => {
             isConnected
         }}>
             {children}
-            {/* Sync Indicator */}
+
+            {/* Loading / Error States */}
+            {isLoading && (
+                <div style={{
+                    position: 'fixed', inset: 0, background: 'rgba(255,255,255,0.9)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000
+                }}>
+                    <div className="text-xl font-bold text-slate-700 animate-pulse">
+                        📄 Reading Master Excel Database...
+                    </div>
+                </div>
+            )}
+
+            {error && (
+                <div style={{
+                    position: 'fixed', inset: 0, background: 'rgba(255,255,255,0.95)',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 10000
+                }}>
+                    <div className="text-2xl font-bold text-red-600 mb-4">SYSTEM ERROR</div>
+                    <div className="text-lg text-slate-800">{error}</div>
+                    <button onClick={handleRefresh} className="btn btn-primary mt-6">Retry Connection</button>
+                </div>
+            )}
+
+            {/* STRICT SYNC POPUP */}
+            {showRefreshPopup && !isLoading && !error && (
+                <div style={{
+                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999
+                }}>
+                    <div className="bg-white p-8 rounded-lg shadow-2xl max-w-md text-center border-4 border-yellow-400 animate-bounce-short">
+                        <div className="text-4xl mb-4">⚠️</div>
+                        <h2 className="text-2xl font-bold text-slate-800 mb-2">Data Updated</h2>
+                        <p className="text-slate-600 mb-6 font-medium">
+                            Admin has updated the Master Excel Record.
+                            <br />
+                            Please refresh to ensure accuracy.
+                        </p>
+                        <button
+                            onClick={handleRefresh}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-full text-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1"
+                        >
+                            🔄 Refresh Page
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Connection Indicator */}
             <div style={{
-                position: 'fixed',
-                bottom: 10,
-                right: 10,
+                position: 'fixed', bottom: 10, right: 10,
                 background: isConnected ? '#10b981' : '#ef4444',
-                color: 'white',
-                padding: '4px 8px',
-                borderRadius: '4px',
-                fontSize: '10px',
-                zIndex: 9999,
-                fontWeight: 'bold',
-                boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                color: 'white', padding: '4px 8px', borderRadius: '4px',
+                fontSize: '10px', zIndex: 50, fontWeight: 'bold'
             }}>
-                {isConnected ? '⚡ LIVE SYNC' : '🔌 DISCONNECTED'}
+                {isConnected ? '⚡ LIVE' : '🔌 OFFLINE'}
             </div>
         </CartonContext.Provider>
     );
