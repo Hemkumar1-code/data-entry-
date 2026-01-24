@@ -23,10 +23,31 @@ export const CartonProvider = ({ children, user }) => {
     const [settings, setSettings] = useState({ activeSeason: '', lockedByAdmin: false, extraSizes: [] });
 
     // UI States
-    const [isConnected, setIsConnected] = useState(false);
+    const [isOnline, setIsOnline] = useState(navigator.onLine);
     const [notification, setNotification] = useState(null); // { message, type }
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
+
+    // --- Connection Detection (Robust) ---
+    useEffect(() => {
+        const handleStatusChange = () => {
+            const online = navigator.onLine;
+            setIsOnline(online);
+            if (!online) {
+                showNotification("Connection Lost. You are offline.", "error");
+            } else {
+                showNotification("Connection Restored. Back online!", "success");
+            }
+        };
+
+        window.addEventListener('online', handleStatusChange);
+        window.addEventListener('offline', handleStatusChange);
+
+        return () => {
+            window.removeEventListener('online', handleStatusChange);
+            window.removeEventListener('offline', handleStatusChange);
+        };
+    }, []);
 
     // --- Firestore Listeners ---
     useEffect(() => {
@@ -62,23 +83,22 @@ export const CartonProvider = ({ children, user }) => {
                     newCartons.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
                 }
 
-                // NOTIFICATION LOGIC
-                // If remote update (not local latency compensation)
-                if (!snapshot.metadata.hasPendingWrites && isConnected) {
-                    // Check if strictly an update (size changed or content changed)
-                    // For now, simple "Live Update" toast
+                // NOTIFICATION LOGIC - Remote Updates
+                // Only show if we are ONLINE and it's not a local write
+                if (!snapshot.metadata.hasPendingWrites && navigator.onLine && !isLoading) {
                     console.log("🔔 Remote update received for Cartons");
-                    showNotification("Live Update: Session data updated by Admin/System.");
+                    showNotification("Live Update: Session data updated.", "info");
                 }
 
                 setCartons(newCartons);
-                setIsConnected(true);
                 setIsLoading(false);
             },
             (err) => {
                 console.error("Cartons Listener Error:", err);
-                setError("Failed to connect to Firebase Cartons. " + err.message);
-                setIsConnected(false);
+                // Only set error if we are supposed to be online
+                if (navigator.onLine) {
+                    setError("Sync Error: " + err.message);
+                }
             }
         );
 
@@ -87,8 +107,8 @@ export const CartonProvider = ({ children, user }) => {
             (docSnap) => {
                 if (docSnap.exists()) {
                     setSettings(docSnap.data());
-                    if (!docSnap.metadata.hasPendingWrites && isConnected) {
-                        showNotification("Live Update: Global Settings changed.");
+                    if (!docSnap.metadata.hasPendingWrites && navigator.onLine && !isLoading) {
+                        showNotification("Live Update: Global Settings changed.", "info");
                     }
                 } else {
                     // Initialize default settings if missing (Only Admin should strictly do this, but safe fallback)
@@ -101,9 +121,7 @@ export const CartonProvider = ({ children, user }) => {
                     }
                 }
             },
-            (err) => {
-                console.error("Settings Listener Error:", err);
-            }
+            (err) => console.error("Settings Listener Error:", err)
         );
 
         return () => {
@@ -114,13 +132,17 @@ export const CartonProvider = ({ children, user }) => {
 
     // --- Actions ---
 
-    const showNotification = (msg) => {
-        setNotification({ message: msg, type: 'info' });
+    const showNotification = (msg, type = 'info') => {
+        setNotification({ message: msg, type });
         // Auto-hide after 3 seconds
         setTimeout(() => setNotification(null), 3000);
     };
 
     const addCarton = async (carton) => {
+        if (!isOnline) {
+            alert("You are OFFLINE. Please check your internet connection.");
+            return;
+        }
         try {
             // Data integrity: Add timestamp and Creator
             const payload = {
@@ -140,6 +162,7 @@ export const CartonProvider = ({ children, user }) => {
     };
 
     const deleteCarton = async (id) => {
+        if (!isOnline) return;
         try {
             await deleteDoc(doc(db, "cartons", id));
         } catch (e) {
@@ -148,6 +171,7 @@ export const CartonProvider = ({ children, user }) => {
     };
 
     const clearCartons = async () => {
+        if (!isOnline) return;
         if (window.confirm("WARNING: Will delete ALL displayed data from Cloud. Continue?")) {
             cartons.forEach(async (c) => {
                 await deleteDoc(doc(db, "cartons", c._id));
@@ -156,6 +180,10 @@ export const CartonProvider = ({ children, user }) => {
     };
 
     const updateSettings = async (newSettings) => {
+        if (!isOnline) {
+            alert("Offline: Cannot update settings.");
+            return;
+        }
         try {
             await setDoc(doc(db, "settings", "global"), newSettings, { merge: true });
         } catch (e) {
@@ -172,7 +200,7 @@ export const CartonProvider = ({ children, user }) => {
             clearCartons,
             settings,
             updateSettings,
-            isConnected
+            isOnline
         }}>
             {children}
 
@@ -200,12 +228,22 @@ export const CartonProvider = ({ children, user }) => {
                 </div>
             )}
 
-            {/* LIVE UPDATE TOAST (Non-blocking) */}
+            {/* NOTIFICATIONS (Toast) */}
             {notification && (
-                <div className="fixed bottom-4 right-4 bg-gray-900 text-white px-6 py-4 rounded-lg shadow-2xl flex items-center gap-4 z-[9999] animate-bounce-short border-l-4 border-green-500">
-                    <span className="text-2xl">⚡</span>
+                <div className={`fixed bottom-4 right-4 text-white px-6 py-4 rounded-lg shadow-2xl flex items-center gap-4 z-[9999] animate-bounce-short border-l-4 ${notification.type === 'error' ? 'bg-red-900 border-red-500' :
+                        notification.type === 'success' ? 'bg-green-900 border-green-500' :
+                            'bg-gray-900 border-blue-500'
+                    }`}>
+                    <span className="text-2xl">
+                        {notification.type === 'error' ? '🔌' : notification.type === 'success' ? '⚡' : 'ℹ️'}
+                    </span>
                     <div>
-                        <h4 className="font-bold text-sm uppercase text-green-400">Real-time Update</h4>
+                        <h4 className={`font-bold text-sm uppercase ${notification.type === 'error' ? 'text-red-400' :
+                                notification.type === 'success' ? 'text-green-400' :
+                                    'text-blue-400'
+                            }`}>
+                            {notification.type === 'error' ? 'Offline' : notification.type === 'success' ? 'Online' : 'Update'}
+                        </h4>
                         <p className="text-sm font-medium">{notification.message}</p>
                     </div>
                 </div>
@@ -214,11 +252,11 @@ export const CartonProvider = ({ children, user }) => {
             {/* Connection Indicator */}
             <div style={{
                 position: 'fixed', bottom: 10, left: 10,
-                background: isConnected ? '#10b981' : '#ef4444',
+                background: isOnline ? '#10b981' : '#ef4444',
                 color: 'white', padding: '4px 8px', borderRadius: '4px',
                 fontSize: '10px', zIndex: 50, fontWeight: 'bold'
             }}>
-                {isConnected ? '🔥 ONLINE' : '🔌 DISCONNECTED'}
+                {isOnline ? '🔥 ONLINE' : '🔌 DISCONNECTED'}
             </div>
         </CartonContext.Provider>
     );
