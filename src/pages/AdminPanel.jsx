@@ -21,12 +21,17 @@ const AdminPanel = ({ user }) => {
     const [uploadError, setUploadError] = useState(null);
 
     const handleGeneratePackingList = () => {
-        if (cartons.length === 0) {
-            alert("No data available to generate packing list.");
-            return;
+        try {
+            if (cartons.length === 0) {
+                alert("No data available to generate packing list.");
+                return;
+            }
+            // Auto-generate using existing carton data
+            generatePackingList(cartons);
+        } catch (e) {
+            console.error(e);
+            alert("Packing List Error: " + e.message);
         }
-        // Auto-generate using existing carton data
-        generatePackingList(cartons);
     };
 
     // ... (existing load settings useEffect)
@@ -161,7 +166,7 @@ const AdminPanel = ({ user }) => {
             generateExcel(cartons, settings);
         } catch (e) {
             console.error(e);
-            alert("Failed to export.");
+            alert("Export Error: " + e.message);
         }
     };
 
