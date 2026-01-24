@@ -1,150 +1,178 @@
-import React, { createContext, useState, useEffect, useContext } from 'react';
-import { io } from 'socket.io-client';
+import React, { createContext, useState, useEffect, useContext, useRef } from 'react';
+import { GOOGLE_SCRIPT_URL } from '../utils/constants';
 
 const CartonContext = createContext();
 
 export const useCarton = () => useContext(CartonContext);
 
-// Initialize Socket outside component to prevent multiple connections
-const socket = io('http://localhost:5000');
+const POLL_INTERVAL_MS = 10000; // Poll every 10 seconds
 
 export const CartonProvider = ({ children }) => {
 
     // --- State ---
     const [cartons, setCartons] = useState([]);
     const [settings, setSettings] = useState({ activeSeason: '', lockedByAdmin: false, extraSizes: [] });
-    const [isConnected, setIsConnected] = useState(socket.connected);
 
-    // STRICT SYNC: Show Popup instead of auto-update
+    // UI States
+    const [isConnected, setIsConnected] = useState(false); // Connected to Google Cloud
     const [showRefreshPopup, setShowRefreshPopup] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    // --- Initial Load & Socket Listeners ---
-    useEffect(() => {
-        // 1. Connectivity Listeners
-        function onConnect() {
-            setIsConnected(true);
-            console.log('✅ Connected to Real-Time Server');
-        }
-        function onDisconnect() {
-            setIsConnected(false);
-            console.log('❌ Disconnected from Real-Time Server');
+    // Refs for Polling
+    const lastSyncTimeRef = useRef(0);
+    const pollingIntervalRef = useRef(null);
+
+    // --- API Helpers ---
+
+    // Generic POST to Google Script
+    const apiCall = async (action, payload = null) => {
+        if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes("YOUR_DEPLOYMENT_ID")) {
+            throw new Error("Please configure GOOGLE_SCRIPT_URL in constants.js");
         }
 
-        socket.on('connect', onConnect);
-        socket.on('disconnect', onDisconnect);
+        const url = payload ? GOOGLE_SCRIPT_URL : `${GOOGLE_SCRIPT_URL}?action=${action}`;
 
-        // 2. Data Sync Listeners - MODIFIED FOR STRICT POPUP WORKFLOW
-        const handleServerUpdate = (data) => {
-            console.log('🔔 Server requires refresh:', data);
-            // DO NOT auto-update state.
-            // DO Show Popup.
-            setShowRefreshPopup(true);
+        // Google Apps Script Web App requires distinct handling for POST
+        // For GET, we append action to query string.
+        // For POST, we use 'no-cors' sometimes or 'text/plain' to avoid CORS preflight issues with GAS.
+        // Standard Fetch with GAS often follows redirects.
+
+        const options = payload ? {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        } : {
+            method: 'GET'
         };
 
-        socket.on('sync_cartons', handleServerUpdate);
-        socket.on('sync_settings', handleServerUpdate);
-        socket.on('admin_refresh_request', handleServerUpdate);
+        // Append action to POST body/query if needed, but GAS 'doPost' reads e.parameter.action too
+        // It's safer to put action in URL even for POST in some GAS patterns, 
+        // OR put it in the body. My GoogleScript.gs reads `e.parameter.action`.
+        const fetchUrl = payload ? `${GOOGLE_SCRIPT_URL}?action=${action}` : url;
 
-        // 3. Initial Fetch (Strict Excel Source)
+        const res = await fetch(fetchUrl, options);
+        if (!res.ok) throw new Error(`API Error: ${res.statusText}`);
+        return await res.json();
+    };
+
+    // --- Initial Load & Polling ---
+    useEffect(() => {
+        let mounted = true;
+
         const initData = async () => {
             setIsLoading(true);
             try {
-                // Parallel fetch for speed
-                const [resCartons, resSettings] = await Promise.all([
-                    fetch('http://localhost:5000/api/cartons'),
-                    fetch('http://localhost:5000/api/settings')
-                ]);
+                // Fetch All Data (doGet)
+                const data = await apiCall('getData'); // doGet doesn't need action really but consistency
+                // My doGet returns {cartons, settings}
 
-                if (!resCartons.ok || !resSettings.ok) throw new Error("Failed to load Excel Data");
-
-                const cartonsData = await resCartons.json();
-                const settingsData = await resSettings.json();
-
-                setCartons(cartonsData);
-                setSettings(settingsData);
-                setError(null);
+                if (mounted) {
+                    setCartons(data.cartons || []);
+                    setSettings(data.settings || { activeSeason: '', lockedByAdmin: false, extraSizes: [] });
+                    setIsConnected(true);
+                    setError(null);
+                    lastSyncTimeRef.current = Date.now(); // Mark our sync time
+                }
             } catch (e) {
                 console.error("Critical Load Error:", e);
-                setError("FAILED TO LOAD DATA FROM EXCEL. Please ensure Server is running.");
+                if (mounted) {
+                    setError(`FAILED TO LOAD FROM GOOGLE SHEET. ${e.message}`);
+                    setIsConnected(false);
+                }
             } finally {
-                setIsLoading(false);
+                if (mounted) setIsLoading(false);
+            }
+        };
+
+        const checkUpdates = async () => {
+            if (showRefreshPopup) return; // Stop polling if already waiting for refresh
+
+            try {
+                // Poll for Metadata
+                const meta = await apiCall('getMetadata');
+                // Check if server was updated AFTER our last sync
+                // Note: server time vs local time skew is a risk. 
+                // Better: Store the "lastUpdated" timestamp from server when we fetched data.
+                // But my doGet currently doesn't return metadata timestamp.
+                // Simplified: If meta.lastUpdated > lastSyncTimeRef.current? 
+                // Yes, assuming we update lastSyncTimeRef when we refresh.
+
+                if (meta && meta.lastUpdated > lastSyncTimeRef.current) {
+                    // Update detected!
+                    console.log("🔔 Cloud requires refresh. Server:", meta.lastUpdated, "Local:", lastSyncTimeRef.current);
+                    setShowRefreshPopup(true);
+                }
+                setIsConnected(true);
+            } catch (e) {
+                console.warn("Polling failed:", e);
+                // Don't show full error screen on poll fail, just set offline status
+                setIsConnected(false);
             }
         };
 
         initData();
 
-        // Cleanup
-        return () => {
-            socket.off('connect', onConnect);
-            socket.off('disconnect', onDisconnect);
-            socket.off('sync_cartons');
-            socket.off('sync_settings');
-            socket.off('admin_refresh_request');
-        };
-    }, []);
+        // Start Polling
+        pollingIntervalRef.current = setInterval(checkUpdates, POLL_INTERVAL_MS);
 
-    // --- API Interactions ---
+        return () => {
+            mounted = false;
+            if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+        };
+    }, []); // Run once on mount
+
+    // --- Actions ---
 
     const addCarton = async (carton) => {
         try {
-            const res = await fetch('http://localhost:5000/api/cartons', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(carton)
-            });
-            if (!res.ok) throw new Error("Failed to save carton to Excel");
+            // Optimistic update? No, strict source of truth.
+            // But waiting for Google Sheet (1-2s) might feel slow. 
+            // We'll show loading or wait.
+            const res = await apiCall('addCarton', carton);
+            if (res.error) throw new Error(res.error);
 
-            // On success, we don't strictly need to do anything because 
-            // the server will emit an event. 
-            // However, for the user who ADDED the item, instant feedback + no popup is usually preferred (Optimistic UI),
-            // OR we treat them same as everyone else (Wait for refresh).
-            // Requirement: "Popup... Appear for all active users".
-            // If I add data, I shouldn't be forced to refresh my own page if I just saved it?
-            // "When Admin saves... Show popup message on USER side".
-            // If I am the one saving, usually I expect success message. 
-            // But to ensure "Excel is Only Source of Truth", technically refreshing is safest.
-            // But standard UX: I update -> I see my update. Others update -> I see popup.
-            // Let's rely on the response from POST to update local state immediately (Optimistic/Confirmed Local),
-            // and ignore the socket event *if* it was triggered by me? 
-            // Socket broadcasting usually goes to *others* (broadcast.emit) or *everyone* (io.emit).
-            // Server currently uses `io.emit` (everyone).
-            // I will suppress popup for 2 seconds after my own action? Or check ID?
-            // For now, to be STRICT as requested ("Excel is ONLY source"), 
-            // even the saver might get a popup, OR we just update local state from response 
-            // and hope the socket event doesn't override/trigger popup loop.
-            // Use a ref to track "I just updated".
-
-            return await res.json();
+            // Succcess.
+            // UPDATE LOCAL STATE manually to reflect change immediately?
+            // Users requested "Excel is ONLY source".
+            // Ideally we re-fetch everything. But that's heavy.
+            // Compromise: Add to locked local state if successful, AND update lastSyncTimeRef
+            // so we don't trigger our own popup.
+            lastSyncTimeRef.current = Date.now() + 5000; // Buffer for clock skew
+            setCartons(prev => [...prev, res.carton]);
+            return res.carton;
         } catch (e) {
             console.error("Error adding carton:", e);
+            alert("Failed to save to Google Sheet: " + e.message);
             throw e;
         }
     };
 
     const clearCartons = async () => {
-        if (window.confirm("WARNING: This will delete ALL data from the Master Excel File. Continue?")) {
-            // Loop delete as placeholder for bulk API
+        if (window.confirm("WARNING: This will delete ALL data from the Google Sheet. Continue?")) {
+            // Loop delete is too slow for GAS. Needs bulk API.
+            // Using loop for now as per previous logic, but really slow.
+            // Ideally Add 'deleteAll' to GAS.
+            // I'll stick to loop for safety with existing script 'deleteCarton'.
             for (const c of cartons) {
-                await fetch(`http://localhost:5000/api/cartons/${c._id}`, { method: 'DELETE' });
+                await apiCall('deleteCarton', { id: c._id });
             }
+            setCartons([]);
+            lastSyncTimeRef.current = Date.now() + 5000;
         }
     };
 
     const updateSettings = async (newSettings) => {
         try {
-            await fetch('http://localhost:5000/api/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newSettings)
-            });
+            const res = await apiCall('updateSettings', newSettings);
+            if (res.error) throw new Error(res.error);
+            setSettings(prev => ({ ...prev, ...newSettings }));
+            lastSyncTimeRef.current = Date.now() + 5000;
         } catch (e) {
             console.error("Failed to update settings", e);
+            alert("Failed to update settings: " + e.message);
         }
     };
 
-    // --- Manual Refresh Handler ---
     const handleRefresh = () => {
         window.location.reload();
     };
@@ -167,7 +195,7 @@ export const CartonProvider = ({ children }) => {
                     display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000
                 }}>
                     <div className="text-xl font-bold text-slate-700 animate-pulse">
-                        📄 Reading Master Excel Database...
+                        ☁️ Connecting to Google Cloud Database...
                     </div>
                 </div>
             )}
@@ -177,8 +205,12 @@ export const CartonProvider = ({ children }) => {
                     position: 'fixed', inset: 0, background: 'rgba(255,255,255,0.95)',
                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 10000
                 }}>
-                    <div className="text-2xl font-bold text-red-600 mb-4">SYSTEM ERROR</div>
-                    <div className="text-lg text-slate-800">{error}</div>
+                    <div className="text-2xl font-bold text-red-600 mb-4">CONNECTION ERROR</div>
+                    <div className="text-lg text-slate-800 mb-2">{error}</div>
+                    <div className="text-sm text-slate-500 max-w-md text-center">
+                        Ensure you have deployed the Google Apps Script and updated
+                        <code>src/utils/constants.js</code> with the correct URL.
+                    </div>
                     <button onClick={handleRefresh} className="btn btn-primary mt-6">Retry Connection</button>
                 </div>
             )}
@@ -193,7 +225,7 @@ export const CartonProvider = ({ children }) => {
                         <div className="text-4xl mb-4">⚠️</div>
                         <h2 className="text-2xl font-bold text-slate-800 mb-2">Data Updated</h2>
                         <p className="text-slate-600 mb-6 font-medium">
-                            Admin has updated the Master Excel Record.
+                            Admin has updated the Cloud Record.
                             <br />
                             Please refresh to ensure accuracy.
                         </p>
@@ -214,7 +246,7 @@ export const CartonProvider = ({ children }) => {
                 color: 'white', padding: '4px 8px', borderRadius: '4px',
                 fontSize: '10px', zIndex: 50, fontWeight: 'bold'
             }}>
-                {isConnected ? '⚡ LIVE' : '🔌 OFFLINE'}
+                {isConnected ? '☁️ GOOGLE CLOUD' : '🔌 DISCONNECTED'}
             </div>
         </CartonContext.Provider>
     );
