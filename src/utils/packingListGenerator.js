@@ -3,11 +3,9 @@ import * as XLSX from 'xlsx';
 /**
  * Normalizes store name by taking the first word/segment.
  * e.g. "BABYBUBLE - A" -> "BABYBUBLE"
- * e.g. "BABYBUBLE KOREA" -> "BABYBUBLE"
  */
 const normalizeStoreName = (name) => {
     if (!name) return "UNKNOWN";
-    // Split by dash, space, or underscore and take the first part
     const parts = name.trim().split(/[\s-_]+/);
     return parts[0].toUpperCase();
 };
@@ -17,156 +15,236 @@ export const generatePackingList = (cartons) => {
 
     const wb = XLSX.utils.book_new();
 
-    // 1. Group Cartons by Normalized Store Name
+    // 1. Group by Normalized Store
     const storeGroups = {};
     cartons.forEach(carton => {
         const normName = normalizeStoreName(carton.storeName);
-        if (!storeGroups[normName]) {
-            storeGroups[normName] = [];
-        }
+        if (!storeGroups[normName]) storeGroups[normName] = [];
         storeGroups[normName].push(carton);
     });
 
-    // 2. Generate Sheet per Store Group
+    // 2. Process Each Store
     Object.keys(storeGroups).forEach(storeName => {
         const groupCartons = storeGroups[storeName];
         const wsData = [];
+        const merges = [];
 
-        // --- Header Section ---
+        // --- Helper: Add Merge ---
+        const addMerge = (sR, sC, eR, eC) => {
+            merges.push({ s: { r: sR, c: sC }, e: { r: eR, c: eC } });
+        };
+
+        // --- Prepare Header Data ---
         const firstCarton = groupCartons[0];
-        const orderNo = firstCarton.buyer || ""; // Using Buyer as Order No
+        const buyer = firstCarton.buyer || "";
+        const season = firstCarton.season || "";
+        const date = new Date().toISOString().split('T')[0];
 
-        // Fixed Title
-        wsData.push(["PACKING LIST"]);
-        wsData.push([]);
+        // Calculate Totals for this Sheet
+        let totalPcsSheet = 0;
+        const dimCounts = {
+            "49X29X40": 0,
+            "49X29X30": 0,
+            "49X29X20": 0,
+            "49X30X25": 0
+        };
 
-        // Exporter
-        wsData.push(["Exporter:"]);
-        wsData.push(["M/s. Sree Kanaga Durgaa Textile"]);
-        wsData.push(["22/41, Muthusamy, 4th Street,"]);
-        wsData.push(["Odakaddu,"]);
-        wsData.push(["Tirupur 641602"]);
-        wsData.push(["Tamilnadu, INDIA"]);
-        wsData.push([]);
+        groupCartons.forEach(c => {
+            const rows = Array.isArray(c.rows) ? c.rows : [];
+            const cTotal = rows.reduce((sum, r) => sum + (parseInt(r.totalPcs) || 0), 0);
+            totalPcsSheet += cTotal;
 
-        // Fabric
-        wsData.push(["Fabric : 100% Organic Cotton Knitted"]);
-        wsData.push([]);
-
-        // Dynamic Header (Order No / Store Name)
-        wsData.push([`Order No : ${orderNo}`]);
-        wsData.push([`Store Name : ${storeName}`]);
-        wsData.push([]);
-
-        // --- Table Headers ---
-        // Columns: Carton No | Season | Store (Original) | Print | Style | Size | Qty | Net Wt | Gr Wt | Dim
-        const headers = [
-            "Carton No", "Season", "Original Store", "Print", "Style", "Size", "Qty (Pcs)", "Net Wt", "Gr Wt", "Dimension"
-        ];
-        wsData.push(headers);
-
-        // --- Data Grouping (Print -> Style -> Size) ---
-        // We'll flatten the structure slightly: Carton -> Rows
-        // But the requirement says "Group data by Print -> Style -> Size". 
-        // We will output CARTONS sorted/grouped by these fields.
-
-        // Sort approach: Sort the entire carton list based on the primary row's Print/Style.
-        // Assuming 1 carton usually has homogeneous content, or we list based on 1st row.
-
-        groupCartons.sort((a, b) => {
-            const rowsA = Array.isArray(a.rows) ? a.rows : [];
-            const rowsB = Array.isArray(b.rows) ? b.rows : [];
-            const rowA = rowsA[0] || {};
-            const rowB = rowsB[0] || {};
-
-            // Sort by Print
-            const printA = (rowA.print || "").toLowerCase();
-            const printB = (rowB.print || "").toLowerCase();
-            if (printA < printB) return -1;
-            if (printA > printB) return 1;
-
-            // Then by Style
-            const styleA = (rowA.style || "").toLowerCase();
-            const styleB = (rowB.style || "").toLowerCase();
-            if (styleA < styleB) return -1;
-            if (styleA > styleB) return 1;
-
-            return 0;
+            // Dimension counting
+            let dimMap = (c.measurement || "").replace(/\s/g, '').toUpperCase();
+            // Try to match partial? Or exact? The user gave generic text "49X29X40". 
+            // We'll normalize "x" to "X".
+            dimMap = dimMap.replace(/x/g, 'X');
+            if (dimCounts[dimMap] !== undefined) {
+                dimCounts[dimMap]++;
+            }
         });
 
-        let currentPrint = null;
-        let currentStyle = null;
-        let styleTotal = 0;
-        let styleNet = 0;
-        let styleGross = 0;
+        // --- GRID CONSTRUCTION (Row by Row) ---
 
-        groupCartons.forEach((carton, idx) => {
-            const rows = Array.isArray(carton.rows) ? carton.rows : [];
-            const rowPrimary = rows[0] || {};
-            const print = rowPrimary.print || "-";
-            const style = rowPrimary.style || "-";
+        // Row 0: Title "PACKING LIST"
+        // Merge A1:I1 (0,0 to 0,8)
+        wsData.push(["PACKING LIST", "", "", "", "", "", "", "", ""]);
+        addMerge(0, 0, 0, 8);
 
-            // Check if group changed
-            if (print !== currentPrint || style !== currentStyle) {
-                // If not first, print total for previous group is optional, but requested "Display quantities... under each group"
-                // Let's settle for a clean list first, maybe total at end of style?
+        // Row 1: Spacer
+        wsData.push([]);
 
-                // Let's insert a spacer if changing group?
-                if (currentPrint !== null) {
-                    // Spacer or Subtotal could go here
-                }
-                currentPrint = print;
-                currentStyle = style;
-                // Reset totals if we were doing per-group totals (implementing running total below)
-            }
+        // Row 2-9: Header Block
+        // We need 3 cols horizontal sections: Exporter (Left), Fabric (Center), Info (Right)
+        // Let's assume columns:
+        // A, B, C : Exporter
+        // D, E    : Fabric
+        // F, G, H, I : Info
 
-            // Calculate carton specifics
-            const totalPcs = rows.reduce((s, r) => s + (parseInt(r.totalPcs) || 0), 0);
-            const net = parseFloat(carton.netWeight) || 0;
-            const gross = parseFloat(carton.grossWeight) || 0;
-            const dim = (carton.measurement || "").replace(/cm/gi, '').trim();
+        // Row 2
+        wsData.push([
+            "Exporter:", "", "", // A-C
+            "Fabric :", "",      // D-E
+            "Buyer :", buyer, "", "" // F-I
+        ]);
+        addMerge(2, 0, 2, 2); // Exporter Label
+        addMerge(2, 3, 2, 4); // Fabric Label
+        addMerge(2, 6, 2, 8); // Buyer Value merge?
 
-            // Extract Size breakdown text (e.g., "S:2, M:4")
-            const sizeText = rows.map(r => {
-                return Object.entries(r.sizes || {})
+        // Row 3
+        wsData.push([
+            "M/s. Sree Kanaga Durgaa Textile", "", "",
+            "100% Organic Cotton Knitted", "",
+            "Invoice No :", "", "", ""
+        ]);
+        addMerge(3, 0, 3, 2); // Exporter Line 1
+        addMerge(3, 3, 3, 4); // Fabric Value
+        addMerge(3, 6, 3, 8); // Invoice Value
+
+        // Row 4
+        wsData.push([
+            "22/41, Muthusamy, 4th Street,", "", "",
+            "", "", // Fabric continued vacant
+            "Season :", season, "", ""
+        ]);
+        addMerge(4, 0, 4, 2);
+        addMerge(4, 6, 4, 8);
+
+        // Row 5
+        wsData.push([
+            "Odakaddu,", "", "",
+            "", "",
+            "Invoice Date :", "", "", ""
+        ]);
+        addMerge(5, 0, 5, 2);
+        addMerge(5, 6, 5, 8);
+
+        // Row 6
+        wsData.push([
+            "Tirupur 641602", "", "",
+            "", "",
+            "Date :", date, "", ""
+        ]);
+        addMerge(6, 0, 6, 2);
+        addMerge(6, 6, 6, 8);
+
+        // Row 7
+        wsData.push([
+            "Tamilnadu, INDIA", "", "",
+            "", "",
+            "Total Pcs/Sets :", totalPcsSheet, "", ""
+        ]);
+        addMerge(7, 0, 7, 2);
+        addMerge(7, 6, 7, 8);
+
+        // Row 8
+        wsData.push([
+            "", "", "", // Exporter Done
+            "", "",
+            "Order Qty :", totalPcsSheet, "", ""
+        ]);
+        addMerge(8, 6, 8, 8);
+
+        // Row 9
+        wsData.push([
+            "Order No :", buyer, "", // From requirement: "Order No must be picked automatically"
+            "Store Name :", storeName,
+            "Destination :", "", "", ""
+        ]);
+        // Let's ensure these are visible. Merging might be needed based on length.
+
+        wsData.push([]); // Spacer
+
+        // --- Dimensions Block ---
+        // "Below the above: CTN Dimension... 49X29X40 – ___ CTNS..."
+        wsData.push(["CTN Dimension"]);
+        addMerge(11, 0, 11, 2);
+
+        // Hardcoded list from prompt
+        const dims = [
+            "49X29X40",
+            "49X29X30",
+            "49X29X20",
+            "49X30X25"
+        ];
+        dims.forEach(d => {
+            const count = dimCounts[d] || 0; // Use count if we found any matches, else 0 (or leave blank `___`?) 
+            // Prompt says "___ CTNS". Let's format it.
+            const text = `${d} – ${count > 0 ? count : '___'} CTNS`;
+            wsData.push([text]);
+            addMerge(wsData.length - 1, 0, wsData.length - 1, 3);
+        });
+
+        wsData.push([]); // Spacer
+
+        // --- DUNS ROW ---
+        // "Large centered merged row displaying: DUNS"
+        wsData.push(["DUNS"]);
+        const dunsRowIdx = wsData.length - 1;
+        addMerge(dunsRowIdx, 0, dunsRowIdx, 8);
+        // We'll style this later (Centered)
+
+        wsData.push([]); // Spacer
+
+        // --- Main Data Table ---
+        // "Mandatory columns: Print, Style, Size, Quantity"
+        // Also "Columns must align". Let's standardise.
+        // A: Carton No, B: Store, C: Print, D: Style, E: Size, F: Qty, G: Net, H: Gross
+
+        const tableHeader = [
+            "Carton No", "Store", "Print", "Style", "Size", "Quantity", "Net Wt", "Gr Wt", "Dimension"
+        ];
+        wsData.push(tableHeader);
+
+        // Sort Data (Print > Style > Size as per usual logic)
+        groupCartons.sort((a, b) => {
+            const rA = (a.rows && a.rows[0]) || {};
+            const rB = (b.rows && b.rows[0]) || {};
+            const pA = (rA.print || "").localeCompare(rB.print || "");
+            if (pA !== 0) return pA;
+            return (rA.style || "").localeCompare(rB.style || "");
+        });
+
+        groupCartons.forEach((c, i) => {
+            const rows = Array.isArray(c.rows) ? c.rows : [];
+            const r = rows[0] || {};
+
+            // Size text: "S:2 | M:4"
+            const sizeText = rows.map(rw => {
+                return Object.entries(rw.sizes || {})
                     .filter(([_, v]) => v && parseInt(v) > 0)
                     .map(([s, v]) => `${s}:${v}`)
                     .join(', ');
             }).join(' | ');
 
+            const total = rows.reduce((s, rw) => s + (parseInt(rw.totalPcs) || 0), 0);
+            const dim = (c.measurement || "").replace(/cm/gi, '').trim();
+
             wsData.push([
-                idx + 1, // Re-index for this sheet? Or keeps original Carton No? "Carton No" usually implies unique ID. 
-                // But if we split sheets, local index 1..N is often preferred. Let's use 1..N per sheet.
-                carton.season,
-                carton.storeName,
-                print,
-                style,
+                i + 1,
+                c.storeName,
+                r.print || "",
+                r.style || "",
                 sizeText,
-                totalPcs,
-                net,
-                gross,
+                total,
+                c.netWeight,
+                c.grossWeight,
                 dim
             ]);
-
-            styleTotal += totalPcs;
-            styleNet += net;
-            styleGross += gross;
         });
 
-        // Grand Total Row
-        wsData.push([]);
-        wsData.push(["", "", "", "", "GRAND TOTAL", "", styleTotal, styleNet.toFixed(2), styleGross.toFixed(2)]);
-
-        // Create Sheet
+        // --- Create Sheet ---
         const ws = XLSX.utils.aoa_to_sheet(wsData);
 
-        // Styling (Col Widths)
+        // Apply Merges
+        ws['!merges'] = merges;
+
+        // Apply Col Widths
         ws['!cols'] = [
-            { wch: 10 }, // Carton No
-            { wch: 15 }, // Season
+            { wch: 10 }, // Carton
             { wch: 20 }, // Store
-            { wch: 15 }, // Print
-            { wch: 15 }, // Style
+            { wch: 20 }, // Print
+            { wch: 20 }, // Style
             { wch: 30 }, // Size
             { wch: 10 }, // Qty
             { wch: 10 }, // Net
@@ -174,26 +252,20 @@ export const generatePackingList = (cartons) => {
             { wch: 15 }  // Dim
         ];
 
-        // Merge Title
-        if (!ws['!merges']) ws['!merges'] = [];
-        ws['!merges'].push({ s: { r: 0, c: 0 }, e: { r: 0, c: 9 } }); // PACKING LIST
+        // Style DUNS row (Center) - XLSX basic style support is limited in free version, 
+        // generally only text content/merges work safely. 
+        // Alignment properties like 's' (style) object often require Pro version or file-saver hacks.
+        // We rely on defaults. Merging usually centers in Excel default view for some titles.
 
-        // Add to Workbook
-        // Sheet name max 31 chars
-        let sheetName = storeName.replace(/[*?:\/\[\]\\]/g, ' ').substring(0, 31);
-        // Ensure unique if dupes exist (unlikely with this logic, but safe)
-        if (wb.Sheets[sheetName]) {
-            sheetName = uniqueSheetName(wb, sheetName);
+        // Append Sheet
+        let finalSheetName = storeName.replace(/[*?:\/\[\]\\]/g, ' ').substring(0, 31);
+        if (wb.Sheets[finalSheetName]) {
+            let i = 1;
+            while (wb.Sheets[`${finalSheetName} ${i}`]) i++;
+            finalSheetName = `${finalSheetName} ${i}`;
         }
-
-        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+        XLSX.utils.book_append_sheet(wb, ws, finalSheetName);
     });
 
-    XLSX.writeFile(wb, "Packing_List_Advanced.xlsx");
+    XLSX.writeFile(wb, "Packing_List_Strict.xlsx");
 };
-
-function uniqueSheetName(wb, name) {
-    let i = 1;
-    while (wb.Sheets[`${name} ${i}`]) i++;
-    return `${name} ${i}`;
-}
