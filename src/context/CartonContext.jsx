@@ -71,6 +71,8 @@ export const CartonProvider = ({ children, user }) => {
             q = query(collection(db, "cartons"), where("createdBy", "==", user.email));
         }
 
+        let isInitialLoad = true; // Local mutable flag for this listener
+
         const unsubCartons = onSnapshot(q,
             (snapshot) => {
                 const newCartons = snapshot.docs.map(doc => ({
@@ -85,13 +87,15 @@ export const CartonProvider = ({ children, user }) => {
 
                 // NOTIFICATION LOGIC - Remote Updates
                 // Only show if we are ONLINE and it's not a local write
-                if (!snapshot.metadata.hasPendingWrites && navigator.onLine && !isLoading) {
+                // Use isInitialLoad to prevent notification on first fetch
+                if (!snapshot.metadata.hasPendingWrites && navigator.onLine && !isInitialLoad) {
                     console.log("🔔 Remote update received for Cartons");
                     showNotification("Admin updated the session/cartons", "info");
                 }
 
                 setCartons(newCartons);
                 setIsLoading(false);
+                isInitialLoad = false; // Mark initial load as complete
             },
             (err) => {
                 console.error("Cartons Listener Error:", err);
