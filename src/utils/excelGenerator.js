@@ -20,7 +20,7 @@ export const generateExcel = (cartons, settings = {}) => {
         "MADE IN INDIA"
     ];
 
-    const dataclounm = [];
+    const dataRows = [];
 
 
 
@@ -78,7 +78,7 @@ export const generateExcel = (cartons, settings = {}) => {
         // 1️⃣3️⃣ MADE IN INDIA RULE (Fixed)
         const origin = "INDIA";
 
-        dataclounm.push([
+        dataRows.push([
             cartonNum,
             season,
             storeName,
