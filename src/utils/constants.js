@@ -9,20 +9,34 @@ export const SIZES = [
 ];
 
 export const PRINT_OPTIONS = [
-    "Beach Pig",
-    "Camelia Rose Dark Pink",
-    "Chiffon Lilac",
-    "Clover – Dandelion Yellow",
-    "Clover – Vibrant Orange",
-    "Fruits – Beach Glass",
-    "Fruits – Blushing Bride",
-    "Happy Flower. Lilac Chiffon",
-    "Jumbled Radish – Blue",
-    "Marina Blue",
-    "Multi Radish – Blue",
-    "Multi Radish – Pink",
-    "Radish – Marina Blue",
-    "Radish – Lilac Chiffon"
+    "Beach Pig — River Blue",
+    "More Than a Fling — Blazing Orange",
+    "More Than a Fling — Camelia Rose Dark Pink",
+    "Terry — Camelia Rose Dark Pink",
+    "More Than a Fling — Chiffon Lilac",
+    "Terry — Chiffon Lilac",
+    "Clover — Dandelion Yellow",
+    "Clover — Sulphur Spring Green",
+    "Clover — Vibrant Orange",
+    "More Than a Fling — Dandelion Yellow",
+    "Fruits — Beach Glass",
+    "Fruits — Blushing Bride",
+    "Happy Flower — Lilac Chiffon",
+    "Happy Flower — Patina Green",
+    "Jellyfish — Marina Blue",
+    "Jumbled Radish — Blue",
+    "Jumbled Radish — Pink",
+    "More Than a Fling — Marina Blue",
+    "Terry — Marina Blue",
+    "Multi Radish — Blue",
+    "Multi Radish — Pink",
+    "More Than a Fling — Patina Green",
+    "Radish — Lilac Chiffon",
+    "Radish — Marina Blue",
+    "Radish — Patina Green",
+    "Radish — Sunshine Pale Yellow",
+    "More Than a Fling — River Blue",
+    "Terry — River Blue"
 ];
 
 export const STYLE_OPTIONS = [
