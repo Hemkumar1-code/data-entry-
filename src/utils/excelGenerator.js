@@ -17,8 +17,9 @@ export const generateExcel = (cartons, settings = {}) => {
         const cartonNum = index + 1;
 
         // 1. DATA AGGREGATION
-        const styles = new Set(carton.rows.map(r => r.style).filter(Boolean));
-        const prints = new Set(carton.rows.map(r => r.print).filter(Boolean));
+        const safeRows = Array.isArray(carton.rows) ? carton.rows : [];
+        const styles = new Set(safeRows.map(r => r.style).filter(Boolean));
+        const prints = new Set(safeRows.map(r => r.print).filter(Boolean));
 
         // Style Logic
         const styleVal = styles.size === 1 ? [...styles][0] : "ALL STYLES";
@@ -27,7 +28,7 @@ export const generateExcel = (cartons, settings = {}) => {
         const colourVal = prints.size === 1 ? [...prints][0] : "ALL COLOURS";
 
         // Total PCS
-        const totalPcs = carton.rows.reduce((sum, row) => sum + (parseInt(row.totalPcs) || 0), 0);
+        const totalPcs = safeRows.reduce((sum, row) => sum + (parseInt(row.totalPcs) || 0), 0);
 
         // Measurement cleaning (remove CM logic)
         let measurement = (carton.measurement || "").toString().replace(/cm/gi, '').trim();

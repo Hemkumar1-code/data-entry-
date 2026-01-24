@@ -74,8 +74,10 @@ export const generatePackingList = (cartons) => {
         // Assuming 1 carton usually has homogeneous content, or we list based on 1st row.
 
         groupCartons.sort((a, b) => {
-            const rowA = a.rows?.[0] || {};
-            const rowB = b.rows?.[0] || {};
+            const rowsA = Array.isArray(a.rows) ? a.rows : [];
+            const rowsB = Array.isArray(b.rows) ? b.rows : [];
+            const rowA = rowsA[0] || {};
+            const rowB = rowsB[0] || {};
 
             // Sort by Print
             const printA = (rowA.print || "").toLowerCase();
@@ -99,7 +101,8 @@ export const generatePackingList = (cartons) => {
         let styleGross = 0;
 
         groupCartons.forEach((carton, idx) => {
-            const rowPrimary = carton.rows?.[0] || {};
+            const rows = Array.isArray(carton.rows) ? carton.rows : [];
+            const rowPrimary = rows[0] || {};
             const print = rowPrimary.print || "-";
             const style = rowPrimary.style || "-";
 
@@ -118,14 +121,14 @@ export const generatePackingList = (cartons) => {
             }
 
             // Calculate carton specifics
-            const totalPcs = carton.rows.reduce((s, r) => s + (parseInt(r.totalPcs) || 0), 0);
+            const totalPcs = rows.reduce((s, r) => s + (parseInt(r.totalPcs) || 0), 0);
             const net = parseFloat(carton.netWeight) || 0;
             const gross = parseFloat(carton.grossWeight) || 0;
             const dim = (carton.measurement || "").replace(/cm/gi, '').trim();
 
             // Extract Size breakdown text (e.g., "S:2, M:4")
-            const sizeText = carton.rows.map(r => {
-                return Object.entries(r.sizes)
+            const sizeText = rows.map(r => {
+                return Object.entries(r.sizes || {})
                     .filter(([_, v]) => v && parseInt(v) > 0)
                     .map(([s, v]) => `${s}:${v}`)
                     .join(', ');
