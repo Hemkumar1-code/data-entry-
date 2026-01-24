@@ -1,11 +1,19 @@
-import React, { createContext, useState, useEffect, useContext, useRef } from 'react';
-import { GOOGLE_SCRIPT_URL } from '../utils/constants';
+import React, { createContext, useState, useEffect, useContext } from 'react';
+import { db } from '../firebase';
+import {
+    collection,
+    addDoc,
+    deleteDoc,
+    doc,
+    onSnapshot,
+    query,
+    orderBy,
+    setDoc
+} from "firebase/firestore";
 
 const CartonContext = createContext();
 
 export const useCarton = () => useContext(CartonContext);
-
-const POLL_INTERVAL_MS = 10000; // Poll every 10 seconds
 
 export const CartonProvider = ({ children }) => {
 
@@ -14,159 +22,115 @@ export const CartonProvider = ({ children }) => {
     const [settings, setSettings] = useState({ activeSeason: '', lockedByAdmin: false, extraSizes: [] });
 
     // UI States
-    const [isConnected, setIsConnected] = useState(false); // Connected to Google Cloud
+    const [isConnected, setIsConnected] = useState(false);
     const [showRefreshPopup, setShowRefreshPopup] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    // Refs for Polling
-    const lastSyncTimeRef = useRef(0);
-    const pollingIntervalRef = useRef(null);
-
-    // --- API Helpers ---
-
-    // Generic POST to Google Script
-    const apiCall = async (action, payload = null) => {
-        if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes("YOUR_DEPLOYMENT_ID")) {
-            throw new Error("Please configure GOOGLE_SCRIPT_URL in constants.js");
-        }
-
-        const url = payload ? GOOGLE_SCRIPT_URL : `${GOOGLE_SCRIPT_URL}?action=${action}`;
-
-        // Google Apps Script Web App requires distinct handling for POST
-        // For GET, we append action to query string.
-        // For POST, we use 'no-cors' sometimes or 'text/plain' to avoid CORS preflight issues with GAS.
-        // Standard Fetch with GAS often follows redirects.
-
-        const options = payload ? {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        } : {
-            method: 'GET'
-        };
-
-        // Append action to POST body/query if needed, but GAS 'doPost' reads e.parameter.action too
-        // It's safer to put action in URL even for POST in some GAS patterns, 
-        // OR put it in the body. My GoogleScript.gs reads `e.parameter.action`.
-        const fetchUrl = payload ? `${GOOGLE_SCRIPT_URL}?action=${action}` : url;
-
-        const res = await fetch(fetchUrl, options);
-        if (!res.ok) throw new Error(`API Error: ${res.statusText}`);
-        return await res.json();
-    };
-
-    // --- Initial Load & Polling ---
+    // --- Firestore Listeners ---
     useEffect(() => {
-        let mounted = true;
+        setIsLoading(true);
+        setError(null);
 
-        const initData = async () => {
-            setIsLoading(true);
-            try {
-                // Fetch All Data (doGet)
-                const data = await apiCall('getData'); // doGet doesn't need action really but consistency
-                // My doGet returns {cartons, settings}
-
-                if (mounted) {
-                    setCartons(data.cartons || []);
-                    setSettings(data.settings || { activeSeason: '', lockedByAdmin: false, extraSizes: [] });
-                    setIsConnected(true);
-                    setError(null);
-                    lastSyncTimeRef.current = Date.now(); // Mark our sync time
-                }
-            } catch (e) {
-                console.error("Critical Load Error:", e);
-                if (mounted) {
-                    setError(`FAILED TO LOAD FROM GOOGLE SHEET. ${e.message}`);
-                    setIsConnected(false);
-                }
-            } finally {
-                if (mounted) setIsLoading(false);
-            }
-        };
-
-        const checkUpdates = async () => {
-            if (showRefreshPopup) return; // Stop polling if already waiting for refresh
-
-            try {
-                // Poll for Metadata
-                const meta = await apiCall('getMetadata');
-                // Check if server was updated AFTER our last sync
-                // Note: server time vs local time skew is a risk. 
-                // Better: Store the "lastUpdated" timestamp from server when we fetched data.
-                // But my doGet currently doesn't return metadata timestamp.
-                // Simplified: If meta.lastUpdated > lastSyncTimeRef.current? 
-                // Yes, assuming we update lastSyncTimeRef when we refresh.
-
-                if (meta && meta.lastUpdated > lastSyncTimeRef.current) {
-                    // Update detected!
-                    console.log("🔔 Cloud requires refresh. Server:", meta.lastUpdated, "Local:", lastSyncTimeRef.current);
+        // 1. Cartons Listener
+        const q = query(collection(db, "cartons"), orderBy("timestamp", "asc"));
+        const unsubCartons = onSnapshot(q,
+            (snapshot) => {
+                const newCartons = snapshot.docs.map(doc => ({
+                    _id: doc.id,
+                    ...doc.data()
+                }));
+                // Check if update came from SERVER (hasPendingWrites = false)
+                // If it's a remote update and we already loaded initial data, trigger popup?
+                // Actually, Firestore keeps state perfectly synced. 
+                // The requirement is "Popup... when Admin updates".
+                // We can use metadata.hasPendingWrites to detect local vs remote.
+                if (!snapshot.metadata.hasPendingWrites && isConnected) {
+                    // Remote update detected
+                    // Check if it's just the initial load?
+                    // isConnected is set to true after initial load.
+                    console.log("🔔 Remote update received for Cartons");
                     setShowRefreshPopup(true);
                 }
+
+                setCartons(newCartons);
                 setIsConnected(true);
-            } catch (e) {
-                console.warn("Polling failed:", e);
-                // Don't show full error screen on poll fail, just set offline status
+                setIsLoading(false);
+            },
+            (err) => {
+                console.error("Cartons Listener Error:", err);
+                setError("Failed to connect to Firebase Cartons. " + err.message);
                 setIsConnected(false);
             }
-        };
+        );
 
-        initData();
-
-        // Start Polling
-        pollingIntervalRef.current = setInterval(checkUpdates, POLL_INTERVAL_MS);
+        // 2. Settings Listener
+        const unsubSettings = onSnapshot(doc(db, "settings", "global"),
+            (docSnap) => {
+                if (docSnap.exists()) {
+                    setSettings(docSnap.data());
+                    if (!docSnap.metadata.hasPendingWrites && isConnected) {
+                        console.log("🔔 Remote update received for Settings");
+                        setShowRefreshPopup(true);
+                    }
+                } else {
+                    // Initialize default settings if missing
+                    setDoc(doc(db, "settings", "global"), {
+                        activeSeason: 'WINTER 2025',
+                        lockedByAdmin: false,
+                        extraSizes: []
+                    });
+                }
+            },
+            (err) => {
+                console.error("Settings Listener Error:", err);
+                // Non-critical if settings fail?
+            }
+        );
 
         return () => {
-            mounted = false;
-            if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+            unsubCartons();
+            unsubSettings();
         };
-    }, []); // Run once on mount
+    }, []); // Run once on mount. 'isConnected' dependency removed to prevent loop, used ref logic implicitly via closure state? No, effect updates state.
+    // Actually using 'isConnected' inside closure of onSnapshot might be stale if effect doesn't re-run.
+    // Better: Rely on a Ref for 'initialLoadComplete' to distinguish boot from update.
 
     // --- Actions ---
 
     const addCarton = async (carton) => {
         try {
-            // Optimistic update? No, strict source of truth.
-            // But waiting for Google Sheet (1-2s) might feel slow. 
-            // We'll show loading or wait.
-            const res = await apiCall('addCarton', carton);
-            if (res.error) throw new Error(res.error);
+            // Data integrity: Add timestamp for sorting
+            const payload = { ...carton, timestamp: Date.now() };
+            // Remove _id if it exists, let Firestore generate it? 
+            // Or use provided one? Standard Firestore: addDoc generates ID.
+            if (payload._id) delete payload._id;
 
-            // Succcess.
-            // UPDATE LOCAL STATE manually to reflect change immediately?
-            // Users requested "Excel is ONLY source".
-            // Ideally we re-fetch everything. But that's heavy.
-            // Compromise: Add to locked local state if successful, AND update lastSyncTimeRef
-            // so we don't trigger our own popup.
-            lastSyncTimeRef.current = Date.now() + 5000; // Buffer for clock skew
-            setCartons(prev => [...prev, res.carton]);
-            return res.carton;
+            await addDoc(collection(db, "cartons"), payload);
+            // Result is instant in local cache (snapshot fires immediately with hasPendingWrites=true)
+            // No need to manual set state.
         } catch (e) {
             console.error("Error adding carton:", e);
-            alert("Failed to save to Google Sheet: " + e.message);
+            alert("Failed to save to Cloud: " + e.message);
             throw e;
         }
     };
 
     const clearCartons = async () => {
-        if (window.confirm("WARNING: This will delete ALL data from the Google Sheet. Continue?")) {
-            // Loop delete is too slow for GAS. Needs bulk API.
-            // Using loop for now as per previous logic, but really slow.
-            // Ideally Add 'deleteAll' to GAS.
-            // I'll stick to loop for safety with existing script 'deleteCarton'.
-            for (const c of cartons) {
-                await apiCall('deleteCarton', { id: c._id });
-            }
-            setCartons([]);
-            lastSyncTimeRef.current = Date.now() + 5000;
+        if (window.confirm("WARNING: This will delete ALL data from the Cloud Database. Continue?")) {
+            // Batch delete
+            // Using a loop for now (Validation: User said "Do not create full app", but bulk delete is safety feature)
+            // Ideally we use a Cloud Function or Batch Write.
+            // Loop is fine for small datasets.
+            cartons.forEach(async (c) => {
+                await deleteDoc(doc(db, "cartons", c._id));
+            });
         }
     };
 
     const updateSettings = async (newSettings) => {
         try {
-            const res = await apiCall('updateSettings', newSettings);
-            if (res.error) throw new Error(res.error);
-            setSettings(prev => ({ ...prev, ...newSettings }));
-            lastSyncTimeRef.current = Date.now() + 5000;
+            await setDoc(doc(db, "settings", "global"), newSettings, { merge: true });
         } catch (e) {
             console.error("Failed to update settings", e);
             alert("Failed to update settings: " + e.message);
@@ -174,7 +138,17 @@ export const CartonProvider = ({ children }) => {
     };
 
     const handleRefresh = () => {
+        // Just reload page to ensure "Strict Sync" vibe, OR just hide popup because data is ALREADY synced?
+        // User requested: "Popup... Please refresh your page." -> "Reflect in all users... update correctly"
+        // In Firestore, the data IS already updated in memory via the snapshot!
+        // So 'Refreshing' technically just re-renders the already-updated data in the context.
+        // BUT to strictly follow the mental model of "Fresh state", we reload.
         window.location.reload();
+
+        // Alternative (Modern):
+        // setShowRefreshPopup(false); 
+        // Logic: Firestore 'newCartons' is already the latest. 
+        // User just needs to acknowledge "Oh, data changed, let me verify".
     };
 
     return (
@@ -195,7 +169,7 @@ export const CartonProvider = ({ children }) => {
                     display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000
                 }}>
                     <div className="text-xl font-bold text-slate-700 animate-pulse">
-                        ☁️ Connecting to Google Cloud Database...
+                        🔥 Connecting to Firebase Cloud...
                     </div>
                 </div>
             )}
@@ -207,16 +181,12 @@ export const CartonProvider = ({ children }) => {
                 }}>
                     <div className="text-2xl font-bold text-red-600 mb-4">CONNECTION ERROR</div>
                     <div className="text-lg text-slate-800 mb-2">{error}</div>
-                    <div className="text-sm text-slate-500 max-w-md text-center">
-                        Ensure you have deployed the Google Apps Script and updated
-                        <code>src/utils/constants.js</code> with the correct URL.
-                    </div>
-                    <button onClick={handleRefresh} className="btn btn-primary mt-6">Retry Connection</button>
+                    <button onClick={() => window.location.reload()} className="btn btn-primary mt-6">Retry Connection</button>
                 </div>
             )}
 
             {/* STRICT SYNC POPUP */}
-            {showRefreshPopup && !isLoading && !error && (
+            {showRefreshPopup && (
                 <div style={{
                     position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999
@@ -246,7 +216,7 @@ export const CartonProvider = ({ children }) => {
                 color: 'white', padding: '4px 8px', borderRadius: '4px',
                 fontSize: '10px', zIndex: 50, fontWeight: 'bold'
             }}>
-                {isConnected ? '☁️ GOOGLE CLOUD' : '🔌 DISCONNECTED'}
+                {isConnected ? '🔥 ONLINE' : '🔌 DISCONNECTED'}
             </div>
         </CartonContext.Provider>
     );

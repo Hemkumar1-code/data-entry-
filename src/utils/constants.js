@@ -1,4 +1,4 @@
-export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec"; // PASTE YOUR GOOGLE APP SCRIPT URL HERE
+// Firebase is now the backend. No Google Script URL needed.
 
 export const BUYER_OPTIONS = ['DUNS', 'MORE THAN A FLINGS'];
 
