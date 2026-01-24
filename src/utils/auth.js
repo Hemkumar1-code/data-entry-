@@ -1,4 +1,4 @@
-export const ADMIN_USERS = ['hemk3672@gmail.com', 'rojes@gmail.com'];
+export const ADMIN_USERS = ['hemk3672@gmail.com', 'rojesh@gmail.com'];
 export const NORMAL_USERS = ['dataentry@gmail.com', 'dataentry1@gmail.com'];
 
 export const loginUser = (email) => {

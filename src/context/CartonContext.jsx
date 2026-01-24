@@ -87,7 +87,7 @@ export const CartonProvider = ({ children, user }) => {
                 // Only show if we are ONLINE and it's not a local write
                 if (!snapshot.metadata.hasPendingWrites && navigator.onLine && !isLoading) {
                     console.log("🔔 Remote update received for Cartons");
-                    showNotification("Data updated by Admin / System", "info");
+                    showNotification("Admin updated the session/cartons", "info");
                 }
 
                 setCartons(newCartons);
