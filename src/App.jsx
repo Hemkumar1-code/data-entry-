@@ -15,7 +15,7 @@ function App() {
   };
 
   return (
-    <CartonProvider>
+    <CartonProvider user={user}>
       <Router>
         <div className="min-h-screen bg-gray-50 font-sans text-slate-900">
 

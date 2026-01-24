@@ -8,14 +8,15 @@ import {
     onSnapshot,
     query,
     orderBy,
-    setDoc
+    setDoc,
+    where
 } from "firebase/firestore";
 
 const CartonContext = createContext();
 
 export const useCarton = () => useContext(CartonContext);
 
-export const CartonProvider = ({ children }) => {
+export const CartonProvider = ({ children, user }) => {
 
     // --- State ---
     const [cartons, setCartons] = useState([]);
@@ -23,34 +24,51 @@ export const CartonProvider = ({ children }) => {
 
     // UI States
     const [isConnected, setIsConnected] = useState(false);
-    const [showRefreshPopup, setShowRefreshPopup] = useState(false);
+    const [notification, setNotification] = useState(null); // { message, type }
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
 
     // --- Firestore Listeners ---
     useEffect(() => {
+        if (!user) {
+            setCartons([]);
+            setIsLoading(false);
+            return;
+        }
+
         setIsLoading(true);
         setError(null);
 
         // 1. Cartons Listener
-        const q = query(collection(db, "cartons"), orderBy("timestamp", "asc"));
+        let q;
+        if (user.role === 'admin') {
+            // Admin sees ALL, sorted by time
+            q = query(collection(db, "cartons"), orderBy("timestamp", "asc"));
+        } else {
+            // Users see ONLY their own data
+            // Note: Client-side sort is safer to avoid missing index errors for compound queries
+            q = query(collection(db, "cartons"), where("createdBy", "==", user.email));
+        }
+
         const unsubCartons = onSnapshot(q,
             (snapshot) => {
                 const newCartons = snapshot.docs.map(doc => ({
                     _id: doc.id,
                     ...doc.data()
                 }));
-                // Check if update came from SERVER (hasPendingWrites = false)
-                // If it's a remote update and we already loaded initial data, trigger popup?
-                // Actually, Firestore keeps state perfectly synced. 
-                // The requirement is "Popup... when Admin updates".
-                // We can use metadata.hasPendingWrites to detect local vs remote.
+
+                // Client-side sort for users (since we removed orderBy to avoid index issues)
+                if (user.role !== 'admin') {
+                    newCartons.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                }
+
+                // NOTIFICATION LOGIC
+                // If remote update (not local latency compensation)
                 if (!snapshot.metadata.hasPendingWrites && isConnected) {
-                    // Remote update detected
-                    // Check if it's just the initial load?
-                    // isConnected is set to true after initial load.
+                    // Check if strictly an update (size changed or content changed)
+                    // For now, simple "Live Update" toast
                     console.log("🔔 Remote update received for Cartons");
-                    setShowRefreshPopup(true);
+                    showNotification("Live Update: Session data updated by Admin/System.");
                 }
 
                 setCartons(newCartons);
@@ -64,27 +82,27 @@ export const CartonProvider = ({ children }) => {
             }
         );
 
-        // 2. Settings Listener
+        // 2. Settings Listener (Global for everyone)
         const unsubSettings = onSnapshot(doc(db, "settings", "global"),
             (docSnap) => {
                 if (docSnap.exists()) {
                     setSettings(docSnap.data());
                     if (!docSnap.metadata.hasPendingWrites && isConnected) {
-                        console.log("🔔 Remote update received for Settings");
-                        setShowRefreshPopup(true);
+                        showNotification("Live Update: Global Settings changed.");
                     }
                 } else {
-                    // Initialize default settings if missing
-                    setDoc(doc(db, "settings", "global"), {
-                        activeSeason: 'WINTER 2025',
-                        lockedByAdmin: false,
-                        extraSizes: []
-                    });
+                    // Initialize default settings if missing (Only Admin should strictly do this, but safe fallback)
+                    if (user.role === 'admin') {
+                        setDoc(doc(db, "settings", "global"), {
+                            activeSeason: 'WINTER 2025',
+                            lockedByAdmin: false,
+                            extraSizes: []
+                        });
+                    }
                 }
             },
             (err) => {
                 console.error("Settings Listener Error:", err);
-                // Non-critical if settings fail?
             }
         );
 
@@ -92,23 +110,28 @@ export const CartonProvider = ({ children }) => {
             unsubCartons();
             unsubSettings();
         };
-    }, []); // Run once on mount. 'isConnected' dependency removed to prevent loop, used ref logic implicitly via closure state? No, effect updates state.
-    // Actually using 'isConnected' inside closure of onSnapshot might be stale if effect doesn't re-run.
-    // Better: Rely on a Ref for 'initialLoadComplete' to distinguish boot from update.
+    }, [user]); // Re-subscribe if user changes
 
     // --- Actions ---
 
+    const showNotification = (msg) => {
+        setNotification({ message: msg, type: 'info' });
+        // Auto-hide after 3 seconds
+        setTimeout(() => setNotification(null), 3000);
+    };
+
     const addCarton = async (carton) => {
         try {
-            // Data integrity: Add timestamp for sorting
-            const payload = { ...carton, timestamp: Date.now() };
-            // Remove _id if it exists, let Firestore generate it? 
-            // Or use provided one? Standard Firestore: addDoc generates ID.
+            // Data integrity: Add timestamp and Creator
+            const payload = {
+                ...carton,
+                timestamp: Date.now(),
+                createdBy: user?.email || 'anonymous' // Tag with user email
+            };
+
             if (payload._id) delete payload._id;
 
             await addDoc(collection(db, "cartons"), payload);
-            // Result is instant in local cache (snapshot fires immediately with hasPendingWrites=true)
-            // No need to manual set state.
         } catch (e) {
             console.error("Error adding carton:", e);
             alert("Failed to save to Cloud: " + e.message);
@@ -125,11 +148,7 @@ export const CartonProvider = ({ children }) => {
     };
 
     const clearCartons = async () => {
-        if (window.confirm("WARNING: This will delete ALL data from the Cloud Database. Continue?")) {
-            // Batch delete
-            // Using a loop for now (Validation: User said "Do not create full app", but bulk delete is safety feature)
-            // Ideally we use a Cloud Function or Batch Write.
-            // Loop is fine for small datasets.
+        if (window.confirm("WARNING: Will delete ALL displayed data from Cloud. Continue?")) {
             cartons.forEach(async (c) => {
                 await deleteDoc(doc(db, "cartons", c._id));
             });
@@ -145,20 +164,6 @@ export const CartonProvider = ({ children }) => {
         }
     };
 
-    const handleRefresh = () => {
-        // Just reload page to ensure "Strict Sync" vibe, OR just hide popup because data is ALREADY synced?
-        // User requested: "Popup... Please refresh your page." -> "Reflect in all users... update correctly"
-        // In Firestore, the data IS already updated in memory via the snapshot!
-        // So 'Refreshing' technically just re-renders the already-updated data in the context.
-        // BUT to strictly follow the mental model of "Fresh state", we reload.
-        window.location.reload();
-
-        // Alternative (Modern):
-        // setShowRefreshPopup(false); 
-        // Logic: Firestore 'newCartons' is already the latest. 
-        // User just needs to acknowledge "Oh, data changed, let me verify".
-    };
-
     return (
         <CartonContext.Provider value={{
             cartons,
@@ -171,18 +176,19 @@ export const CartonProvider = ({ children }) => {
         }}>
             {children}
 
-            {/* Loading / Error States */}
+            {/* Loading Overlay (Initial Only) */}
             {isLoading && (
                 <div style={{
-                    position: 'fixed', inset: 0, background: 'rgba(255,255,255,0.9)',
+                    position: 'fixed', inset: 0, background: 'rgba(255,255,255,0.8)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000
                 }}>
                     <div className="text-xl font-bold text-slate-700 animate-pulse">
-                        🔥 Connecting to Firebase Cloud...
+                        🔥 Syncing with Firebase...
                     </div>
                 </div>
             )}
 
+            {/* Error Overlay */}
             {error && (
                 <div style={{
                     position: 'fixed', inset: 0, background: 'rgba(255,255,255,0.95)',
@@ -194,33 +200,20 @@ export const CartonProvider = ({ children }) => {
                 </div>
             )}
 
-            {/* STRICT SYNC POPUP */}
-            {showRefreshPopup && (
-                <div style={{
-                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999
-                }}>
-                    <div className="bg-white p-8 rounded-lg shadow-2xl max-w-md text-center border-4 border-yellow-400 animate-bounce-short">
-                        <div className="text-4xl mb-4">⚠️</div>
-                        <h2 className="text-2xl font-bold text-slate-800 mb-2">Data Updated</h2>
-                        <p className="text-slate-600 mb-6 font-medium">
-                            Admin has updated the Cloud Record.
-                            <br />
-                            Please refresh to ensure accuracy.
-                        </p>
-                        <button
-                            onClick={handleRefresh}
-                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-full text-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1"
-                        >
-                            🔄 Refresh Page
-                        </button>
+            {/* LIVE UPDATE TOAST (Non-blocking) */}
+            {notification && (
+                <div className="fixed bottom-4 right-4 bg-gray-900 text-white px-6 py-4 rounded-lg shadow-2xl flex items-center gap-4 z-[9999] animate-bounce-short border-l-4 border-green-500">
+                    <span className="text-2xl">⚡</span>
+                    <div>
+                        <h4 className="font-bold text-sm uppercase text-green-400">Real-time Update</h4>
+                        <p className="text-sm font-medium">{notification.message}</p>
                     </div>
                 </div>
             )}
 
             {/* Connection Indicator */}
             <div style={{
-                position: 'fixed', bottom: 10, right: 10,
+                position: 'fixed', bottom: 10, left: 10,
                 background: isConnected ? '#10b981' : '#ef4444',
                 color: 'white', padding: '4px 8px', borderRadius: '4px',
                 fontSize: '10px', zIndex: 50, fontWeight: 'bold'
