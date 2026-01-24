@@ -116,6 +116,14 @@ export const CartonProvider = ({ children }) => {
         }
     };
 
+    const deleteCarton = async (id) => {
+        try {
+            await deleteDoc(doc(db, "cartons", id));
+        } catch (e) {
+            console.error("Error deleting carton:", e);
+        }
+    };
+
     const clearCartons = async () => {
         if (window.confirm("WARNING: This will delete ALL data from the Cloud Database. Continue?")) {
             // Batch delete
@@ -155,6 +163,7 @@ export const CartonProvider = ({ children }) => {
         <CartonContext.Provider value={{
             cartons,
             addCarton,
+            deleteCarton,
             clearCartons,
             settings,
             updateSettings,

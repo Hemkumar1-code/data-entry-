@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { generateExcel } from '../utils/excelGenerator';
 import { useCarton } from '../context/CartonContext';
 import { sortSizes } from '../utils/sizeSorter';
 import { generatePackingList } from '../utils/packingListGenerator';
 
 const AdminPanel = ({ user }) => {
-    const { cartons, clearCartons, settings = {}, updateSettings } = useCarton();
+    const { cartons, addCarton, deleteCarton, clearCartons, settings = {}, updateSettings } = useCarton();
+    // Expose for helper
+    useEffect(() => { window.contextAddCarton = addCarton; }, [addCarton]);
     const [localSeason, setLocalSeason] = useState(settings?.activeSeason || 'WINTER 2025');
 
     // Sync local input with global settings on mount/change
@@ -26,7 +29,7 @@ const AdminPanel = ({ user }) => {
                 alert("No data available to generate packing list.");
                 return;
             }
-            // Auto-generate using existing carton data
+
             generatePackingList(cartons);
         } catch (e) {
             console.error(e);
@@ -34,7 +37,7 @@ const AdminPanel = ({ user }) => {
         }
     };
 
-    // ... (existing load settings useEffect)
+
     useEffect(() => {
         setUploadedFiles([]);
     }, []);
@@ -57,27 +60,7 @@ const AdminPanel = ({ user }) => {
         alert("Active Season Updated (Locked for Data Entry Users)!");
     };
 
-    const handleAddSize = async () => {
-        if (!newSize) return;
-        // Check for duplicates (case-insensitive)
-        if (extraSizes.some(s => s.toLowerCase() === newSize.trim().toLowerCase())) {
-            alert("Size already exists!");
-            setNewSize('');
-            return;
-        }
-
-        const updatedSizes = [...extraSizes, newSize.trim()];
-        setExtraSizes(updatedSizes);
-        setNewSize('');
-
-        // Save global settings via Context
-        updateSettings({ extraSizes: updatedSizes });
-        alert(`Size ${newSize} added!`);
-    };
-
-    // Removed fetchFiles and handleFileUpload as backend is gone
-    const fetchFiles = () => { };
-
+    // Client-side Excel Parse & Upload
     const handleFileUpload = async (e) => {
         setIsProcessing(true);
         setUploadError(null);
@@ -88,65 +71,112 @@ const AdminPanel = ({ user }) => {
             return;
         }
 
-        const formData = new FormData();
-        files.forEach(file => {
-            formData.append('files', file);
-        });
+        const file = files[0];
 
         try {
-            const res = await fetch('/api/upload', {
-                method: 'POST',
-                body: formData
+            const data = await file.arrayBuffer();
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+            if (json.length === 0) {
+                setUploadError("Excel file is empty.");
+                setIsProcessing(false);
+                return;
+            }
+
+            // Headers are row 0
+            const headers = json[0];
+            const rows = json.slice(1);
+
+            const newCartons = [];
+            const errors = [];
+
+            // Helper to find index case-insensitively
+            const getColIndex = (name) => headers.findIndex(h => String(h).trim().toLowerCase() === name.toLowerCase());
+
+            const colStore = getColIndex('Store');
+            const colStyle = getColIndex('Style');
+            const colPrint = getColIndex('Print');
+            const colPrintAlt = getColIndex('Colour');
+            const colSize = getColIndex('Size');
+            const colQty = getColIndex('Qty');
+
+            // If critical columns missing
+            if (colStore === -1) {
+                throw new Error("Missing 'Store' column.");
+            }
+
+            rows.forEach((row, rowIndex) => {
+                // Skip empty rows
+                if (row.length === 0) return;
+
+                const store = row[colStore];
+                // If store is present, we assume valid row
+                if (store) {
+                    const item = {
+                        fileName: file.name,
+                        uploadDate: new Date().toISOString(),
+                        storeName: String(store).trim(),
+                        style: colStyle > -1 ? String(row[colStyle] || '').trim() : '',
+                        print: (colPrint > -1 ? row[colPrint] : (colPrintAlt > -1 ? row[colPrintAlt] : '')) || '',
+                        // Store raw data for flexible "Size" handling if needed, 
+                        // but for Data Entry dropdowns, we just need the uniques.
+                        // User said: "Dropdowns ... populated from Firebase."
+                        // We'll store these fields.
+                        originalData: JSON.stringify(row)
+                    };
+                    newCartons.push(item);
+                }
             });
 
-            const result = await res.json();
-
-            if (!res.ok) {
-                setUploadError(result.error || 'Upload failed');
-            } else {
-                if (result.errors && result.errors.length > 0) {
-                    setUploadError(`Some files failed: ${result.errors.map(e => e.file).join(', ')}`);
-                }
-                // Refresh list
-                fetchFiles();
+            if (newCartons.length === 0) {
+                setUploadError("No valid rows found.");
+                return;
             }
+
+            // Batch Upload (Limit concurrency if needed, but Firestore SDK handles it)
+            // We use map to trigger all
+            let successCount = 0;
+            for (const carton of newCartons) {
+                await addCarton(carton);
+                successCount++;
+            }
+
+            alert(`Successfully uploaded ${successCount} entries from ${file.name}.`);
+
         } catch (err) {
-            console.error(err);
-            setUploadError("Network error during upload.");
+            console.error("Error parsing Excel file:", err);
+            setUploadError("Error parsing Excel file: " + err.message);
         } finally {
             setIsProcessing(false);
-            // Reset input
             e.target.value = null;
         }
     };
 
-    const handleDeleteFile = async (id) => {
-        if (window.confirm("Delete this file? This will remove associated store/style/print data.")) {
-            try {
-                const res = await fetch(`/api/files/${id}`, { method: 'DELETE' });
-                if (res.ok) {
-                    setUploadedFiles(prev => prev.filter(f => f._id !== id));
-                } else {
-                    alert("Failed to delete file");
-                }
-            } catch (e) {
-                console.error(e);
-                alert("Error deleting file");
+    const handleDeleteFile = async (fileName) => {
+        if (window.confirm(`Delete all data from "${fileName}"? This cannot be undone.`)) {
+            // Find all cartons with this filename
+            const toDelete = cartons.filter(c => c.fileName === fileName);
+
+            if (toDelete.length === 0) {
+                alert("No data found for this file.");
+                return;
             }
+
+            // Delete via context
+            for (const c of toDelete) {
+                await deleteCarton(c._id);
+            }
+            alert(`Deleted ${toDelete.length} entries for ${fileName}`);
         }
     };
 
-    const handleViewFile = async (file) => {
-        // Fetch full details including rows
-        try {
-            const res = await fetch(`/api/files/${file._id}`);
-            if (res.ok) {
-                const data = await res.json();
-                setViewingFile(data);
-            }
-        } catch (e) {
-            console.error(e);
-        }
+    const handleViewFile = (fileObj) => {
+        // fileObj is { fileName, count } derived from cartons
+        const rows = cartons.filter(c => c.fileName === fileObj.fileName);
+        setViewingFile({ fileName: fileObj.fileName, rows: rows.map(r => JSON.parse(r.originalData || '{}')) });
     };
 
     const handleNewSheet = () => {
