@@ -1,9 +1,6 @@
 import * as XLSX from 'xlsx';
 
-/**
- * PART A: FIRST EXCEL – STRICT RULE BOOK (CARTON SHEET)
- * One row = One carton.
- */
+
 export const generateExcel = (cartons, settings = {}) => {
     if (!cartons || cartons.length === 0) return;
 
@@ -23,20 +20,9 @@ export const generateExcel = (cartons, settings = {}) => {
         "MADE IN INDIA"
     ];
 
-    const dataRows = [];
+    const dataclounm = [];
 
-    // Sort cartons by numeric ID if possible, or just index
-    // Requirement says "Carton No. Numeric only (1, 2, 3...)". 
-    // We will generate this essentially as the Row Index + 1.
-    // Preserving input order is usually best unless "Carton No" is a saved field user edited.
-    // The instructions say "Carton No... Auto-increment preferred".
-    // However, DataEntry.jsx SAVES a "Carton No." field (cartonDetails.cartonNo).
-    // If user manually entered "100", should we use "100" or auto-increment "1"?
-    // "Auto-increment preferred" implies we generate it. "User-typed... match -> Accept" applies to STORE NAME.
-    // "Carton No... Numeric only... No duplicate carton numbers".
-    // I will auto-generate 1..N based on array index to guarantee uniqueness and sequence.
-    // If the user provided specific numbers, ignoring them might be risky, but "Auto-increment preferred" suggests generation.
-    // Let's stick to Auto-Increment 1..N.
+
 
     cartons.forEach((carton, index) => {
         // 2️⃣ DATA START RULE (Row 2 onwards)
@@ -92,7 +78,7 @@ export const generateExcel = (cartons, settings = {}) => {
         // 1️⃣3️⃣ MADE IN INDIA RULE (Fixed)
         const origin = "INDIA";
 
-        dataRows.push([
+        dataclounm.push([
             cartonNum,
             season,
             storeName,

@@ -7,10 +7,7 @@ import { sortSizes } from './sizeSorter';
  */
 const normalizeStoreName = (name) => {
     if (!name) return "UNKNOWN";
-    // Check if hyphen exists to split, otherwise take whole or first word?
-    // "BABYBUBBLE ANSON" -> "BABYBUBBLE" (First word logic usually safe if space separated)
-    // "BABYBUBBLE-A" -> "BABYBUBBLE"
-    // Regex: Split by space or hyphen
+
     const parts = name.trim().split(/[\s-]+/);
     return parts[0].toUpperCase();
 };
