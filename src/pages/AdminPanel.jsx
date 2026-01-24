@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { generateExcel } from '../utils/excelGenerator';
 import { useCarton } from '../context/CartonContext';
-
 import { sortSizes } from '../utils/sizeSorter';
+import { generatePackingList } from '../utils/packingListGenerator';
 
 const AdminPanel = ({ user }) => {
     const { cartons, clearCartons, settings = {}, updateSettings } = useCarton();
@@ -13,6 +12,7 @@ const AdminPanel = ({ user }) => {
     useEffect(() => {
         if (settings?.activeSeason) setLocalSeason(settings.activeSeason);
     }, [settings?.activeSeason]);
+
     const [extraSizes, setExtraSizes] = useState([]);
     const [newSize, setNewSize] = useState('');
     const [uploadedFiles, setUploadedFiles] = useState([]);
@@ -20,10 +20,17 @@ const AdminPanel = ({ user }) => {
     const [viewingFile, setViewingFile] = useState(null);
     const [uploadError, setUploadError] = useState(null);
 
-    // Load files and settings on mount
-    // Load files and settings on mount
+    const handleGeneratePackingList = () => {
+        if (cartons.length === 0) {
+            alert("No data available to generate packing list.");
+            return;
+        }
+        // Auto-generate using existing carton data
+        generatePackingList(cartons);
+    };
+
+    // ... (existing load settings useEffect)
     useEffect(() => {
-        // No files to fetch (backend removed)
         setUploadedFiles([]);
     }, []);
 
@@ -32,7 +39,7 @@ const AdminPanel = ({ user }) => {
             const res = await fetch('/api/settings');
             if (res.ok) {
                 const data = await res.json();
-                if (data.activeSeason) setSeason(data.activeSeason);
+                if (data.activeSeason) setLocalSeason(data.activeSeason);
                 if (data.extraSizes) setExtraSizes(data.extraSizes);
             }
         } catch (e) {
@@ -169,10 +176,19 @@ const AdminPanel = ({ user }) => {
                             onClick={handleNewSheet}
                             className="group bg-black hover:bg-gray-900 text-white shadow-xl flex items-center gap-3 px-8 py-4 rounded-full font-bold text-xl transition-all transform hover:-translate-y-1 active:scale-95 border-2 border-gray-800"
                         >
-                            <span className="text-3xl group-hover:rotate-12 transition-transform">�</span>
+                            <span className="text-3xl group-hover:rotate-12 transition-transform">📄</span>
                             <span>New Sheet</span>
                         </button>
                     )}
+
+                    <button
+                        onClick={handleGeneratePackingList}
+                        className="group bg-blue-600 hover:bg-blue-700 text-white shadow-xl flex items-center gap-3 px-8 py-4 rounded-full font-bold text-xl transition-all transform hover:-translate-y-1 active:scale-95 border-2 border-blue-800"
+                    >
+                        <span className="text-3xl group-hover:rotate-12 transition-transform">📦</span>
+                        <span>Download Packing List</span>
+                    </button>
+
                     <button
                         onClick={handleDownloadExcel}
                         className="group bg-black hover:bg-gray-900 text-white shadow-xl flex items-center gap-3 px-8 py-4 rounded-full font-bold text-xl transition-all transform hover:-translate-y-1 active:scale-95 border-2 border-gray-800"
@@ -185,8 +201,6 @@ const AdminPanel = ({ user }) => {
 
             {/* Dashboard Stats & Settings */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-
-
                 {user?.role === 'admin' && (
                     <div className="card space-y-4">
                         <div>
@@ -226,12 +240,7 @@ const AdminPanel = ({ user }) => {
                 )}
             </div>
 
-            {/* Upload Module Removed as per request */}
-
-            {/* File List */}
-
-
-            {/* File View Modal */}
+            {/* View File Modal */}
             {viewingFile && (
                 <div className="modal-overlay" onClick={() => setViewingFile(null)}>
                     <div className="modal-content" style={{ maxWidth: '900px', width: '90%' }} onClick={e => e.stopPropagation()}>
