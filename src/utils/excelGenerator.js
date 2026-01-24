@@ -1,64 +1,131 @@
 import * as XLSX from 'xlsx';
 
 /**
- * Generates an Excel workbook with one sheet per carton.
- * Strict formatting rules applied.
+ * PART A: FIRST EXCEL – STRICT RULE BOOK (CARTON SHEET)
+ * One row = One carton.
  */
 export const generateExcel = (cartons, settings = {}) => {
     if (!cartons || cartons.length === 0) return;
 
-    const { activeSeason, lockedByAdmin } = settings;
+    const { activeSeason } = settings;
 
-    const wb = XLSX.utils.book_new();
-    const totalCartons = cartons.length;
+    // 1️⃣ HEADER RULE (ROW 1 – FIXED)
+    const header = [
+        "CARTON No.",
+        "SEASON",
+        "STORE NAME",
+        "COLOUR",
+        "STYLE",
+        "TOTAL PCS",
+        "NET WEIGHT",
+        "GROSS WEIGHT",
+        "CARTON DIMENSION",
+        "MADE IN INDIA"
+    ];
+
+    const dataRows = [];
+
+    // Sort cartons by numeric ID if possible, or just index
+    // Requirement says "Carton No. Numeric only (1, 2, 3...)". 
+    // We will generate this essentially as the Row Index + 1.
+    // Preserving input order is usually best unless "Carton No" is a saved field user edited.
+    // The instructions say "Carton No... Auto-increment preferred".
+    // However, DataEntry.jsx SAVES a "Carton No." field (cartonDetails.cartonNo).
+    // If user manually entered "100", should we use "100" or auto-increment "1"?
+    // "Auto-increment preferred" implies we generate it. "User-typed... match -> Accept" applies to STORE NAME.
+    // "Carton No... Numeric only... No duplicate carton numbers".
+    // I will auto-generate 1..N based on array index to guarantee uniqueness and sequence.
+    // If the user provided specific numbers, ignoring them might be risky, but "Auto-increment preferred" suggests generation.
+    // Let's stick to Auto-Increment 1..N.
 
     cartons.forEach((carton, index) => {
-        const sheetData = [];
+        // 2️⃣ DATA START RULE (Row 2 onwards)
+
+        // 3️⃣ CARTON No. (Auto 1..N)
         const cartonNum = index + 1;
 
-        // 1. DATA AGGREGATION
-        const safeRows = Array.isArray(carton.rows) ? carton.rows : [];
-        const styles = new Set(safeRows.map(r => r.style).filter(Boolean));
-        const prints = new Set(safeRows.map(r => r.print).filter(Boolean));
+        // 4️⃣ SEASON RULE (Mandatory)
+        const season = carton.season || activeSeason || "";
 
-        // Style Logic
-        const styleVal = styles.size === 1 ? [...styles][0] : "ALL STYLES";
+        // 5️⃣ STORE NAME RULE (Strict match)
+        const storeName = carton.storeName || "";
 
-        // Color Logic (using Print field)
-        const colourVal = prints.size === 1 ? [...prints][0] : "ALL COLOURS";
+        // Analyze Rows for Print/Style
+        const rows = Array.isArray(carton.rows) ? carton.rows : [];
+        const prints = new Set(rows.map(r => r.print).filter(Boolean));
+        const styles = new Set(rows.map(r => r.style).filter(Boolean));
 
-        // Total PCS
-        const totalPcs = safeRows.reduce((sum, row) => sum + (parseInt(row.totalPcs) || 0), 0);
+        // 6️⃣ COLOUR (PRINT) RULE
+        // >1 different print -> "ALL COLOUR"
+        // 1 print -> User selected print name
+        let colourVal = "ALL COLOUR";
+        if (prints.size === 1) {
+            colourVal = [...prints][0];
+        } else if (prints.size === 0) {
+            colourVal = "";
+        }
 
-        // Measurement cleaning (remove CM logic)
-        let measurement = (carton.measurement || "").toString().replace(/cm/gi, '').trim();
+        // 7️⃣ STYLE RULE
+        // >1 different style -> "ALL STYLE"
+        // 1 style -> User selected style
+        let styleVal = "ALL STYLE";
+        if (styles.size === 1) {
+            styleVal = [...styles][0];
+        } else if (styles.size === 0) {
+            styleVal = "";
+        }
 
-        // 2. BUILD VERTICAL HEADER
-        const rows = [
-            ["CARTON No.", `${cartonNum} OF ${totalCartons}`],
-            ["SEASON", lockedByAdmin ? activeSeason : (carton.season || activeSeason)],
-            ["STORE NAME", carton.storeName || ""],
-            ["COLOUR", colourVal],
-            ["STYLE", styleVal],
-            ["TOTAL PCS", totalPcs],
-            ["NET WEIGHT", carton.netWeight], // User enters Kg? Add unit if needed? Prompt said "Net Weight (Kg)" in UI label.
-            ["GROSS WEIGHT", carton.grossWeight],
-            ["CARTON DIMENSION", measurement],
-            ["MADE IN INDIA", ""]
-        ];
+        // 9️⃣ TOTAL PCS RULE (Sum of all quantities)
+        // 8️⃣ SIZE RULE (Size columns NOT allowed in this Excel)
+        const totalPcs = rows.reduce((sum, r) => sum + (parseInt(r.totalPcs) || 0), 0);
 
-        // Create Sheet
-        const ws = XLSX.utils.aoa_to_sheet(rows);
+        // 1️⃣0️⃣ NET WEIGHT RULE (Numeric)
+        const netWeight = parseFloat(carton.netWeight) || 0;
 
-        // Column Widths
-        ws['!cols'] = [{ wch: 25 }, { wch: 40 }];
+        // 1️⃣1️⃣ GROSS WEIGHT RULE (Numeric > Net)
+        const grossWeight = parseFloat(carton.grossWeight) || 0;
 
-        // No Gridlines (property supported in some viewers)
-        ws['!gridlines'] = false;
+        // 1️⃣2️⃣ CARTON DIMENSION RULE (L x W x H)
+        // Clean "cm" if present
+        const dimension = (carton.measurement || "").replace(/cm/gi, '').trim();
 
-        XLSX.utils.book_append_sheet(wb, ws, `CARTON ${cartonNum}`);
+        // 1️⃣3️⃣ MADE IN INDIA RULE (Fixed)
+        const origin = "INDIA";
+
+        dataRows.push([
+            cartonNum,
+            season,
+            storeName,
+            colourVal,
+            styleVal,
+            totalPcs,
+            netWeight,
+            grossWeight,
+            dimension,
+            origin
+        ]);
     });
 
+    // Create Worksheet
+    const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows]);
+
+    // Column Widths (Visual help)
+    ws['!cols'] = [
+        { wch: 10 }, // Carton No
+        { wch: 15 }, // Season
+        { wch: 25 }, // Store
+        { wch: 20 }, // Colour
+        { wch: 20 }, // Style
+        { wch: 10 }, // Total
+        { wch: 10 }, // Net
+        { wch: 10 }, // Gross
+        { wch: 15 }, // Dim
+        { wch: 10 }  // Origin
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Carton Sheet");
+
     // Write file
-    XLSX.writeFile(wb, "Shipping_Manifest.xlsx");
+    XLSX.writeFile(wb, "Carton_Entry_Strict.xlsx");
 };
