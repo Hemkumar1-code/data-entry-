@@ -128,7 +128,7 @@ export default function AdminSettings() {
           <h3 className="text-white font-semibold mb-2">How notifications work</h3>
           <p className="text-white/50 text-sm leading-relaxed">
             When a field user stops tracking, the app opens WhatsApp with a pre-filled message to each
-            saved number. For fully automated server-side delivery, integrate Twilio&apos;s WhatsApp API on a
+            saved number. For fully automated server-side delivery, integrate Twilio's WhatsApp API on a
             backend/cloud function using the numbers stored here.
           </p>
         </GlassCard>

@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { SessionContext } from './sessionCtx';
 
 export function SessionProvider({ children }) {
-  const [session, setSession] = useState({ firebaseUser: null, role: null, profile: null });
+  // firebaseUser starts as `undefined` (auth not yet checked),
+  // becomes a User object on login, or `null` on logout / no session.
+  const [session, setSession] = useState({ firebaseUser: undefined, role: null, profile: null });
 
   const setUser = (firebaseUser) => setSession((s) => ({ ...s, firebaseUser }));
   const setRole = (role) => setSession((s) => ({ ...s, role }));

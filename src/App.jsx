@@ -17,6 +17,13 @@ import AdminSettings from './pages/AdminSettings';
 function AppRoutes() {
   const { firebaseUser, role, setUser, setRole, setProfile } = useSession();
 
+  // firebaseUser starts as null; we use a sentinel to track if auth has resolved.
+  // After onAuthStateChanged fires, it's either a User object or explicitly null.
+  // We derive loading from firebaseUser being undefined (pre-auth-check).
+  // Instead, we track loading with a separate approach using the role sentinel:
+  // - Before first auth check: role is null and firebaseUser is null
+  // We initialize firebaseUser to undefined in sessionCtx and set it to null on logout.
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (user) {
@@ -35,6 +42,7 @@ function AppRoutes() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Show spinner while auth state is still loading (firebaseUser is undefined = not yet checked)
   if (firebaseUser === undefined) {
     return (
       <div className="min-h-screen bg-[#0B1220] flex items-center justify-center">
